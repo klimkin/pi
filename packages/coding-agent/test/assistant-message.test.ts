@@ -45,6 +45,24 @@ describe("AssistantMessageComponent", () => {
 		expect(lines[lines.length - 1].startsWith(OSC133_ZONE_END + OSC133_ZONE_FINAL)).toBe(true);
 	});
 
+	test("returns the same marked lines on repeated renders without stacking markers", () => {
+		initTheme("dark");
+
+		const component = new AssistantMessageComponent(createAssistantMessage([{ type: "text", text: "hello" }]));
+		const lines = component.render(40);
+		const again = component.render(40);
+
+		// Parents reuse their output by array identity, so an unchanged message must return the same array.
+		expect(again).toBe(lines);
+		expect(again[0].split(OSC133_ZONE_START)).toHaveLength(2);
+
+		component.updateContent(createAssistantMessage([{ type: "text", text: "hello again" }]));
+		const updated = component.render(40);
+		expect(updated).not.toBe(lines);
+		expect(updated[0].split(OSC133_ZONE_START)).toHaveLength(2);
+		expect(stripAnsi(updated.join("\n"))).toContain("hello again");
+	});
+
 	test("does not add OSC 133 zone markers when assistant message contains tool calls", () => {
 		initTheme("dark");
 

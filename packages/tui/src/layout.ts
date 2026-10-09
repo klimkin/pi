@@ -4,7 +4,7 @@ import { allocateStackSizes, visibleStackEntries } from "./components/stack.ts";
 import { renderVStack, VStack } from "./components/v-stack.ts";
 import { getLayoutNode, type LayoutNode } from "./layout-node.ts";
 import { cropKittyImageLine, getKittyImageMetadata, getMaxKittyImageRows, isImageLine } from "./terminal-image.ts";
-import { type Component, CURSOR_MARKER, compositeTuiLine } from "./tui.ts";
+import { type Component, Container, CURSOR_MARKER, compositeTuiLine } from "./tui.ts";
 import {
 	extractAnsiCode,
 	getActiveBackgroundAnsi,
@@ -31,7 +31,12 @@ export interface LayoutBox {
 	lines?: readonly string[];
 	lineOffset?: number;
 	scrollView?: ScrollView;
+	/** Full scroll content. Built on first access when the content is a stacked Container. */
 	scrollContentLines?: readonly string[];
+	/** Plain Container laid out as stacked child boxes instead of one concatenated leaf. */
+	stacked?: boolean;
+	/** Rendered lines of a layout-node child of a stacked box, for scroll content lookups. */
+	sourceLines?: readonly string[];
 	layer: number;
 }
 
@@ -130,6 +135,72 @@ function updateClips(box: LayoutBox, parentClip: LayoutRect): void {
 	for (const child of box.children) updateClips(child, box.clip);
 }
 
+/**
+ * A Container with the default render and mouse handling only concatenates its children.
+ * As direct scroll content (the fullscreen transcript document), layout places its children
+ * as separate boxes instead, so a streaming update does not copy the whole history into the
+ * document's array as well. Only one level is stacked: a box per message costs more than
+ * copying a message's lines, so the children themselves render as ordinary leaves.
+ */
+function isStackableContainer(component: Component): component is Container {
+	return (
+		component instanceof Container &&
+		component.render === Container.prototype.render &&
+		component.handleMouse === Container.prototype.handleMouse
+	);
+}
+
+function layoutStackedContainer(
+	context: LayoutContext,
+	container: Container,
+	x: number,
+	y: number,
+	width: number,
+	clip: LayoutRect,
+): LayoutBox {
+	const rect = { x, y, width, height: 0 };
+	const box: LayoutBox = { component: container, rect, clip, children: [], stacked: true, layer: 0 };
+	let childY = y;
+	for (const child of container.children) {
+		const childBox = layoutComponent(context, child, x, childY, width, undefined, clip);
+		// Stacks and scroll views have no lines of their own; keep their rendering for lookups.
+		if (!childBox.lines) childBox.sourceLines = renderCached(context, child, width);
+		box.children.push(withParent(childBox, box));
+		childY += childBox.rect.height;
+	}
+	rect.height = childY - y;
+	box.clip = intersect(clip, rect);
+	return box;
+}
+
+/** Concatenate a stacked box's child lines; equals what Container.render would return. */
+function collectStackedLines(box: LayoutBox): string[] {
+	const out: string[] = [];
+	for (const child of box.children) {
+		const lines = child.lines ?? child.sourceLines ?? [];
+		for (let row = 0; row < child.rect.height; row++) out.push(lines[row] ?? "");
+	}
+	return out;
+}
+
+/** Content line at a row of a scroll box without materializing a stacked content's full lines. */
+function scrollContentLineAt(box: LayoutBox, row: number): string | undefined {
+	const content = box.children[0];
+	if (!content?.stacked) return box.scrollContentLines?.[row];
+	const y = content.rect.y + row;
+	const children = content.children;
+	let low = 0;
+	let high = children.length - 1;
+	while (low <= high) {
+		const mid = (low + high) >> 1;
+		const child = children[mid]!;
+		if (y < child.rect.y) high = mid - 1;
+		else if (y >= child.rect.y + child.rect.height) low = mid + 1;
+		else return (child.lines ?? child.sourceLines)?.[y - child.rect.y];
+	}
+	return undefined;
+}
+
 function layoutComponent(
 	context: LayoutContext,
 	component: Component,
@@ -163,15 +234,9 @@ function layoutComponent(
 	if (node.type === "scroll") {
 		const previousScrollTop = node.state.scrollTop;
 		const contentWidth = node.state.getContentWidth(safeWidth);
-		const childBox = layoutComponent(
-			context,
-			node.component,
-			x,
-			y - previousScrollTop,
-			contentWidth,
-			undefined,
-			clip,
-		);
+		const childBox = isStackableContainer(node.component)
+			? layoutStackedContainer(context, node.component, x, y - previousScrollTop, contentWidth, clip)
+			: layoutComponent(context, node.component, x, y - previousScrollTop, contentWidth, undefined, clip);
 		const contentHeight = childBox.rect.height;
 		const viewportHeight = height === undefined ? contentHeight : Math.max(0, Math.floor(height));
 		node.state.updateLayout(contentHeight, viewportHeight, context.requestRender);
@@ -180,13 +245,21 @@ function layoutComponent(
 		if (node.state.primary || !context.primaryScrollView) context.primaryScrollView = scrollView;
 		const rect = { x, y, width: safeWidth, height: viewportHeight };
 		const childClip = intersect(clip, rect);
+		let contentLines: readonly string[] | undefined = childBox.stacked
+			? undefined
+			: renderCached(context, node.component, contentWidth);
 		const box: LayoutBox = {
 			component,
 			rect,
 			clip: childClip,
 			children: [childBox],
 			scrollView,
-			scrollContentLines: renderCached(context, node.component, contentWidth),
+			// Search, selection, and copy read the full content on demand; painting a stacked
+			// transcript does not need it, so it is not built every frame.
+			get scrollContentLines() {
+				contentLines ??= collectStackedLines(childBox);
+				return contentLines;
+			},
 			layer: 0,
 		};
 		childBox.parent = box;
@@ -383,14 +456,14 @@ function paintBox(box: LayoutBox, screen: string[], totalWidth: number): void {
 	}
 	for (const child of box.children) paintBox(child, screen, totalWidth);
 
-	if (box.scrollView && box.scrollContentLines && box.scrollView.scrollTop > 0 && box.rect.height > 0) {
+	if (box.scrollView && box.scrollView.scrollTop > 0 && box.rect.height > 0) {
 		// Find the nearest image line above the viewport. Placeholder rows below an
 		// image line may contain padding, borders, or side-by-side text, so the search
 		// is bounded by the tallest registered image instead of by row content.
 		const scrollTop = box.scrollView.scrollTop;
 		const minRow = Math.max(0, scrollTop - getMaxKittyImageRows());
 		for (let imageRow = scrollTop - 1; imageRow >= minRow; imageRow--) {
-			const imageLine = box.scrollContentLines[imageRow] ?? "";
+			const imageLine = scrollContentLineAt(box, imageRow) ?? "";
 			if (!isImageLine(imageLine)) continue;
 			const metadata = getKittyImageMetadata(imageLine);
 			if (!metadata) continue;

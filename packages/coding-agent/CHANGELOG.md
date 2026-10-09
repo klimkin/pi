@@ -24,6 +24,9 @@
 - Fixed streamed tool calls re-running their call renderer on every argument delta; the interactive mode now renders the latest arguments once per frame, so a large streamed `write` no longer re-highlights its whole content per delta ([#9265](https://github.com/earendil-works/pi/issues/9265))
 - Fixed the login dialog opening sign-in URLs that are not web URLs, and printing control characters from sign-in, device-code, and info URLs, which could end a terminal hyperlink and send escape sequences to the terminal
 
+### Fixed
+- Reduced fullscreen render CPU in long sessions: unchanged messages, borders, and spacers now return cached lines, so frames no longer copy the whole transcript
+
 ## [1.4.0] - 2026-10-21
 
 ### New Features

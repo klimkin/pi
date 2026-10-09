@@ -177,6 +177,8 @@ Use [Themes](themes.md) to create terminal palettes. Use Pi’s `getMarkdownThem
 
 Rendering runs on the interactive path. Cache expensive layout and highlighting work by width and content, then clear that cache from `invalidate()`.
 
+Treat arrays returned by `render()` as read-only. Built-in containers return the same cached array while nothing changed and compare children by array identity, so return your cached lines when unchanged, return a new array when content changes, and copy a child's or `super.render()` result before modifying it.
+
 Keep the default view compact and reveal detail through expansion or a dedicated screen. For custom tool rendering, handle partial results and reuse the previous component when it can be updated safely.
 
 Use `PI_TUI_WRITE_LOG` to capture the raw ANSI stream when diagnosing rendering problems. Test narrow widths, wide characters, resize events, theme changes, focus transitions, and both regular and fullscreen modes.

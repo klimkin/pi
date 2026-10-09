@@ -24,6 +24,19 @@ describe("UserMessageComponent", () => {
 		expect(lines[2].endsWith(BG_RESET)).toBe(true);
 	});
 
+	test("returns the same marked lines on repeated renders without stacking markers", () => {
+		initTheme("dark");
+
+		const component = new UserMessageComponent("hello");
+		const lines = component.render(20);
+		const again = component.render(20);
+
+		// Parents reuse their output by array identity, so an unchanged message must return the same array.
+		expect(again).toBe(lines);
+		expect(again[0].split(OSC133_ZONE_START)).toHaveLength(2);
+		expect(again[2].split(OSC133_ZONE_END)).toHaveLength(2);
+	});
+
 	test("chains Markdown transformers with user message context", () => {
 		initTheme("dark");
 		const calls: string[] = [];

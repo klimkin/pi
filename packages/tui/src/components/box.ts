@@ -3,6 +3,9 @@ import { flattenLines, visibleWidth } from "../utils.ts";
 
 type RenderCache = {
 	childLines: string[];
+	children: Component[];
+	childArrays: string[][];
+	childLengths: number[];
 	width: number;
 	bgSample: string | undefined;
 	lines: string[];
@@ -104,61 +107,81 @@ export class Box implements Component {
 	}
 
 	render(width: number): string[] {
-		if (this.children.length === 0) {
-			return [];
-		}
-
 		const contentWidth = Math.max(1, width - this.paddingX * 2);
-		const leftPad = " ".repeat(this.paddingX);
+		const children = this.children;
+		// Check if bgFn output changed by sampling
+		const bgSample = this.bgFn ? this.bgFn("test") : undefined;
 
-		// Render all children. Keep the child lines unpadded: children usually return the same string
-		// objects every frame, so the cache check below is a cheap identity comparison per line.
-		// Padding here would create new strings that must be compared character by character.
+		// Render all children. Fast path: every child returned the same array (identity and
+		// length) as last time, so the padded output is unchanged without touching any line.
+		const cache = this.cache;
+		let sameChildArrays =
+			cache !== undefined &&
+			cache.width === width &&
+			cache.bgSample === bgSample &&
+			cache.children.length === children.length;
+		const childArrays = new Array<string[]>(children.length);
+		for (let index = 0; index < children.length; index++) {
+			const child = children[index]!;
+			const lines = child.render(contentWidth);
+			childArrays[index] = lines;
+			if (
+				sameChildArrays &&
+				(cache!.children[index] !== child ||
+					cache!.childArrays[index] !== lines ||
+					cache!.childLengths[index] !== lines.length)
+			) {
+				sameChildArrays = false;
+			}
+		}
+		if (sameChildArrays) return cache!.lines;
+
+		// Keep the child lines unpadded: children usually return the same string objects every
+		// frame, so the cache check below is a cheap identity comparison per line. Padding here
+		// would create new strings that must be compared character by character.
 		const childLines: string[] = [];
 		const mouseChildren: Array<{ component: Component; height: number }> = [];
-		for (const child of this.children) {
-			const lines = child.render(contentWidth);
-			mouseChildren.push({ component: child, height: lines.length });
+		for (let index = 0; index < children.length; index++) {
+			const lines = childArrays[index]!;
+			mouseChildren.push({ component: children[index]!, height: lines.length });
 			for (const line of lines) {
 				childLines.push(line);
 			}
 		}
 		this.mouseLayout = { width: contentWidth, children: mouseChildren };
 
+		let result: string[];
 		if (childLines.length === 0) {
-			return [];
+			result = [];
+		} else if (this.matchCache(width, childLines, bgSample)) {
+			result = cache!.lines;
+		} else {
+			const leftPad = " ".repeat(this.paddingX);
+			result = [];
+			// Top padding
+			for (let i = 0; i < this.paddingY; i++) {
+				result.push(this.applyBg("", width));
+			}
+			// Content
+			for (const line of childLines) {
+				result.push(this.applyBg(leftPad + line, width));
+			}
+			// Bottom padding
+			for (let i = 0; i < this.paddingY; i++) {
+				result.push(this.applyBg("", width));
+			}
+			flattenLines(result);
 		}
 
-		// Check if bgFn output changed by sampling
-		const bgSample = this.bgFn ? this.bgFn("test") : undefined;
-
-		// Check cache validity
-		if (this.matchCache(width, childLines, bgSample)) {
-			return this.cache!.lines;
-		}
-
-		// Apply background and padding
-		const result: string[] = [];
-
-		// Top padding
-		for (let i = 0; i < this.paddingY; i++) {
-			result.push(this.applyBg("", width));
-		}
-
-		// Content
-		for (const line of childLines) {
-			result.push(this.applyBg(leftPad + line, width));
-		}
-
-		// Bottom padding
-		for (let i = 0; i < this.paddingY; i++) {
-			result.push(this.applyBg("", width));
-		}
-
-		// Update cache
-		flattenLines(result);
-		this.cache = { childLines, width, bgSample, lines: result };
-
+		this.cache = {
+			childLines,
+			children: [...children],
+			childArrays,
+			childLengths: childArrays.map((lines) => lines.length),
+			width,
+			bgSample,
+			lines: result,
+		};
 		return result;
 	}
 
