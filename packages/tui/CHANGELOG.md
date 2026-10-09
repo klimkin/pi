@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed layout rendering the children of measured `VStack`, `HStack`, and `ScrollView` components twice per frame, which doubled render cost for the fullscreen input dock (editor, widgets, footer)
+
 ## [1.3.0] - 2026-10-15
 
 ## [1.2.0] - 2026-10-12

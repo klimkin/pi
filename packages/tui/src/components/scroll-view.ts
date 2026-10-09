@@ -1,5 +1,17 @@
 import { LAYOUT_NODE, type ScrollLayoutNode } from "../layout-node.ts";
 import { type Component, Container } from "../tui.ts";
+import type { RenderChild } from "./stack.ts";
+
+/** Render the full scroll content, reserving the scrollbar column. Shared by ScrollView.render and layout measurement. */
+export function renderScrollViewContent(
+	child: Component,
+	width: number,
+	contentWidth: number,
+	renderChild: RenderChild,
+): string[] {
+	const lines = renderChild(child, contentWidth);
+	return contentWidth === width ? lines : lines.map((line) => `${line} `);
+}
 
 export type ScrollViewScrollbar = "hidden" | "auto" | "always";
 
@@ -213,9 +225,9 @@ export class ScrollView extends Container {
 	}
 
 	override render(width: number): string[] {
-		const contentWidth = this.getContentWidth(width);
-		const lines = this.child.render(contentWidth);
-		return contentWidth === width ? lines : lines.map((line) => `${line} `);
+		return renderScrollViewContent(this.child, width, this.getContentWidth(width), (component, childWidth) =>
+			component.render(childWidth),
+		);
 	}
 
 	[LAYOUT_NODE](): ScrollLayoutNode {

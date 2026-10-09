@@ -1,6 +1,8 @@
-import type { ScrollView } from "./components/scroll-view.ts";
+import { renderHStack } from "./components/h-stack.ts";
+import { renderScrollViewContent, type ScrollView } from "./components/scroll-view.ts";
 import { allocateStackSizes, visibleStackEntries } from "./components/stack.ts";
-import { getLayoutNode } from "./layout-node.ts";
+import { renderVStack } from "./components/v-stack.ts";
+import { getLayoutNode, type LayoutNode } from "./layout-node.ts";
 import { cropKittyImageLine, getKittyImageMetadata, isImageLine } from "./terminal-image.ts";
 import { type Component, CURSOR_MARKER, compositeTuiLine } from "./tui.ts";
 import {
@@ -74,10 +76,25 @@ function renderCached(context: LayoutContext, component: Component, width: numbe
 	}
 	let lines = widths.get(safeWidth);
 	if (!lines) {
-		lines = component.render(safeWidth);
+		const node = getLayoutNode(component);
+		lines = node ? renderLayoutNode(context, node, safeWidth) : component.render(safeWidth);
 		widths.set(safeWidth, lines);
 	}
 	return lines;
+}
+
+/**
+ * Render a stack or scroll node through renderCached so measuring it does not
+ * render its children a second time. Layout later lays out the same children
+ * at the same widths and reuses these cached lines.
+ */
+function renderLayoutNode(context: LayoutContext, node: LayoutNode, width: number): string[] {
+	const renderChild = (child: Component, childWidth: number) => renderCached(context, child, childWidth);
+	if (node.type === "scroll") {
+		return renderScrollViewContent(node.component, width, node.state.getContentWidth(width), renderChild);
+	}
+	if (node.type === "vstack") return renderVStack(node.entries, node.gap, width, renderChild);
+	return renderHStack(node.entries, node.gap, node.align, width, renderChild);
 }
 
 function measureHeight(context: LayoutContext, component: Component, width: number): number {

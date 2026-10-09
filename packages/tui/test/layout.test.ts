@@ -48,6 +48,32 @@ describe("viewport layout", () => {
 		assert.strictEqual(renderCount, 1);
 	});
 
+	it("renders children of measured nested stacks once per frame", () => {
+		const counts = { vstackChild: 0, hstackChild: 0, scrollChild: 0 };
+		const counted = (key: keyof typeof counts, line: string) => ({
+			render: () => {
+				counts[key] += 1;
+				return [line];
+			},
+			invalidate: () => {},
+		});
+		const dock = new VStack([
+			counted("vstackChild", "status"),
+			new HStack([counted("hstackChild", "left"), { render: () => ["right"], invalidate: () => {} }], { gap: 1 }),
+			new ScrollView(counted("scrollChild", "scrolled"), { scrollbar: "always" }),
+		]);
+		const root = new VStack([
+			{ component: new Text("body", 0, 0), basis: 0, grow: 1 },
+			{ component: dock, basis: "auto" },
+		]);
+
+		const frame = renderLayoutFrame(root, 20, 5, () => {});
+
+		assert.deepStrictEqual(visibleLines(frame.lines), ["body", "", "status", "left right", "scrolled           ┃"]);
+		// The HStack child renders at the full width to measure, then at its allocated width.
+		assert.deepStrictEqual(counts, { vstackChild: 1, hstackChild: 2, scrollChild: 1 });
+	});
+
 	it("paints only clipped rows from very large scroll content", () => {
 		const lineCount = 1_000_000_000;
 		const lines: string[] = [];
