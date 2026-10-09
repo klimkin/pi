@@ -13,6 +13,7 @@
 - Fixed `ProcessTerminal.setTitle()` writing control characters from the title, which could end the title sequence and send the rest to the terminal as escape sequences
 - Fixed layout rendering the children of measured `VStack`, `HStack`, and `ScrollView` components twice per frame, which doubled render cost for the fullscreen input dock (editor, widgets, footer)
 - Fixed fullscreen frames copying the entire transcript on every render. `Container` reuses its previous output when no child changed and copies only the changed tail otherwise, and layout places the children of a plain `Container` scroll content as separate boxes; the large-transcript benchmark drops from 0.33 to 0.05 ms per steady frame and from 0.39 to 0.34 ms per streaming frame
+- Fixed fullscreen frames normalizing and measuring the width of every screen row each frame. Rows repeated from the previous frame, including rows moved by scrolling, reuse their finished output
 
 
 ### Breaking Changes

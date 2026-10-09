@@ -97,6 +97,46 @@ describe("TuiAltScreen", () => {
 		tui.stop();
 	});
 
+	it("clamps and resets reused rows like new rows across scrolling and resizes", async () => {
+		const terminal = new RecordingTerminal(8, 3);
+		const tui = new TuiAltScreen(terminal);
+		const wide = "\x1b[31mwide red line\x1b[39m";
+		const lines = ["one", wide, "same", "same", "\ttab"];
+		tui.addChild({ render: () => lines, invalidate: () => {} });
+		tui.start();
+		await terminal.waitForRender();
+		assert.deepStrictEqual(
+			(await terminal.flushAndGetViewport()).map((line) => line.trimEnd()),
+			["same", "same", "   tab"],
+		);
+
+		// Scrolling up moves already finished rows to other screen rows; the over-wide row must stay clamped.
+		tui.scrollBy(-1);
+		tui.renderNow();
+		assert.deepStrictEqual(
+			(await terminal.flushAndGetViewport()).map((line) => line.trimEnd()),
+			["wide red", "same", "same"],
+		);
+		tui.scrollBy(-1);
+		tui.renderNow();
+		assert.deepStrictEqual(
+			(await terminal.flushAndGetViewport()).map((line) => line.trimEnd()),
+			["one", "wide red", "same"],
+		);
+		const written = terminal.events.map((event) => (event.type === "write" ? event.data : "")).join("");
+		assert.ok(written.includes("\x1b[0m\x1b]8;;\x07"), "rows end with the style and hyperlink reset");
+
+		// A width change clamps again instead of reusing rows finished for the old width.
+		terminal.resize(5, 3);
+		tui.renderNow();
+		assert.deepStrictEqual(
+			(await terminal.flushAndGetViewport()).map((line) => line.trimEnd()),
+			["one", "wide", "same"],
+		);
+
+		tui.stop();
+	});
+
 	it("shows a clickable jump-to-end indicator on the transcript's last row while scrolled up", async () => {
 		const terminal = new VirtualTerminal(30, 6);
 		const tui = new TuiAltScreen(terminal, undefined, undefined, {

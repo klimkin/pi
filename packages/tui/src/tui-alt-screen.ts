@@ -38,6 +38,7 @@ import {
 	compositeTuiLine,
 	dispatchMouseEvent,
 	type OverlayHandle,
+	resetTerminalLine,
 	retargetMouseEvent,
 	TuiBase,
 	type TuiMouseButton,
@@ -207,6 +208,9 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	private lastDocument: string[] = [];
 	private previousScreenWidth = 0;
 	private previousScreenHeight = 0;
+	// Last frame's finished rows keyed by their composed line. Most rows repeat between frames
+	// (also when scrolling shifts them), so they skip normalization and the visible-width clamp.
+	private finishedRows: { width: number; rows: Map<string, string> } = { width: 0, rows: new Map() };
 	private layoutRoot: Component | undefined;
 	private currentLayout: LayoutFrame | undefined;
 	private readonly implicitDocument: Component;
@@ -497,7 +501,25 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		this.previousScreen = [];
 		this.previousScreenWidth = 0;
 		this.previousScreenHeight = 0;
+		this.finishedRows = { width: 0, rows: new Map() };
 		this.currentLayout = undefined;
+	}
+
+	/** Reset each row's styles and clamp it to the width, reusing last frame's result for repeated rows. */
+	private finishRows(screen: string[], width: number): string[] {
+		const previous = this.finishedRows.width === width ? this.finishedRows.rows : undefined;
+		const rows = new Map<string, string>();
+		const finished = screen.map((line) => {
+			let output = rows.get(line) ?? previous?.get(line);
+			if (output === undefined) {
+				const reset = resetTerminalLine(line);
+				output = isImageLine(reset) || visibleWidth(reset) <= width ? reset : sliceByColumn(reset, 0, width, true);
+			}
+			rows.set(line, output);
+			return output;
+		});
+		this.finishedRows = { width, rows };
+		return finished;
 	}
 
 	scrollBy(lines: number): void {
@@ -1713,10 +1735,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		screen = this.compositeFlashes(screen, width, height);
 
 		const cursorPos = this.extractCursorPosition(screen, height);
-		screen = this.applyLineResets(screen).map((line) => {
-			if (isImageLine(line) || visibleWidth(line) <= width) return line;
-			return sliceByColumn(line, 0, width, true);
-		});
+		screen = this.finishRows(screen, width);
 
 		const fullRedraw =
 			this.previousScreen.length === 0 || this.previousScreenWidth !== width || this.previousScreenHeight !== height;

@@ -477,6 +477,11 @@ export class Container implements Component {
  */
 const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
 
+/** Normalize a terminal row and close its styles and hyperlinks so they do not leak into the next row. */
+export function resetTerminalLine(line: string): string {
+	return isImageLine(line) ? line : normalizeTerminalOutput(line) + SEGMENT_RESET;
+}
+
 /** Composite overlay content into a terminal line at a fixed column. */
 export function compositeTuiLine(
 	baseLine: string,
@@ -1504,12 +1509,8 @@ export abstract class TuiBase extends Container implements TUI {
 	}
 
 	protected applyLineResets(lines: string[]): string[] {
-		const reset = SEGMENT_RESET;
 		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			if (!isImageLine(line)) {
-				lines[i] = normalizeTerminalOutput(line) + reset;
-			}
+			lines[i] = resetTerminalLine(lines[i]);
 		}
 		return lines;
 	}
