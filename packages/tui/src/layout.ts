@@ -1,6 +1,8 @@
-import type { ScrollView } from "./components/scroll-view.ts";
+import { HStack, renderHStack } from "./components/h-stack.ts";
+import { renderScrollViewContent, ScrollView } from "./components/scroll-view.ts";
 import { allocateStackSizes, visibleStackEntries } from "./components/stack.ts";
-import { getLayoutNode } from "./layout-node.ts";
+import { renderVStack, VStack } from "./components/v-stack.ts";
+import { getLayoutNode, type LayoutNode } from "./layout-node.ts";
 import { cropKittyImageLine, getKittyImageMetadata, getMaxKittyImageRows, isImageLine } from "./terminal-image.ts";
 import { type Component, CURSOR_MARKER, compositeTuiLine } from "./tui.ts";
 import {
@@ -65,6 +67,13 @@ function intersect(a: LayoutRect, b: LayoutRect): LayoutRect {
 	return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
 }
 
+// renderLayoutNode reproduces only these methods; an overridden render must run itself.
+const BUILT_IN_LAYOUT_RENDERS = new Set<Component["render"]>([
+	VStack.prototype.render,
+	HStack.prototype.render,
+	ScrollView.prototype.render,
+]);
+
 function renderCached(context: LayoutContext, component: Component, width: number): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
 	let widths = context.renderCache.get(component);
@@ -74,10 +83,28 @@ function renderCached(context: LayoutContext, component: Component, width: numbe
 	}
 	let lines = widths.get(safeWidth);
 	if (!lines) {
-		lines = component.render(safeWidth);
+		const node = getLayoutNode(component);
+		lines =
+			node && BUILT_IN_LAYOUT_RENDERS.has(component.render)
+				? renderLayoutNode(context, node, safeWidth)
+				: component.render(safeWidth);
 		widths.set(safeWidth, lines);
 	}
 	return lines;
+}
+
+/**
+ * Render a stack or scroll node through renderCached so measuring it does not
+ * render its children a second time. Layout later lays out the same children
+ * at the same widths and reuses these cached lines.
+ */
+function renderLayoutNode(context: LayoutContext, node: LayoutNode, width: number): string[] {
+	const renderChild = (child: Component, childWidth: number) => renderCached(context, child, childWidth);
+	if (node.type === "scroll") {
+		return renderScrollViewContent(node.component, width, node.state.getContentWidth(width), renderChild);
+	}
+	if (node.type === "vstack") return renderVStack(node.entries, node.gap, width, renderChild);
+	return renderHStack(node.entries, node.gap, node.align, width, renderChild);
 }
 
 function measureHeight(context: LayoutContext, component: Component, width: number): number {

@@ -16,6 +16,9 @@ export interface StackEntry extends StackEntryOptions {
 
 export type StackChild = Component | StackEntry;
 
+/** Renders a child component; layout passes a per-frame cached renderer. */
+export type RenderChild = (component: Component, width: number) => string[];
+
 export interface StackOptions {
 	gap?: number;
 	align?: "stretch" | "start" | "center" | "end";

@@ -6,13 +6,54 @@ import { Text } from "../src/components/text.ts";
 import { VStack } from "../src/components/v-stack.ts";
 import { renderLayoutFrame } from "../src/layout.ts";
 import { encodeKitty, registerKittyImageMetadata } from "../src/terminal-image.ts";
+import type { Component } from "../src/tui.ts";
 import { stripTerminalSequences } from "../src/utils.ts";
 
 function visibleLines(lines: string[]): string[] {
 	return lines.map((line) => stripTerminalSequences(line).trimEnd());
 }
 
+function fixedLines(lines: string[]): Component {
+	return { render: () => lines, invalidate: () => {} };
+}
+
 describe("viewport layout", () => {
+	it("measures stack and scroll subclasses through their overridden render", () => {
+		let calls = 0;
+		class ExtraRowVStack extends VStack {
+			override render(width: number): string[] {
+				calls++;
+				return [...super.render(width), "extra"];
+			}
+		}
+		class ExtraRowHStack extends HStack {
+			override render(width: number): string[] {
+				calls++;
+				return [...super.render(width), "extra"];
+			}
+		}
+		class ExtraRowScrollView extends ScrollView {
+			override render(width: number): string[] {
+				calls++;
+				return [...super.render(width), "extra"];
+			}
+		}
+		const cases: [string, () => Component][] = [
+			["vstack", () => new ExtraRowVStack([fixedLines(["base"])])],
+			["hstack", () => new ExtraRowHStack([fixedLines(["base"])])],
+			["scroll", () => new ExtraRowScrollView(fixedLines(["base"]))],
+			["vstack of stack", () => new ExtraRowVStack([new VStack([fixedLines(["base"])])])],
+			["hstack of stack", () => new ExtraRowHStack([new VStack([fixedLines(["base"])])])],
+			["scroll of stack", () => new ExtraRowScrollView(new VStack([fixedLines(["base"])]))],
+		];
+		for (const [name, make] of cases) {
+			calls = 0;
+			const frame = renderLayoutFrame(new VStack([make(), fixedLines(["following"])]), 10, 3, () => {});
+			assert.strictEqual(calls, 1, name);
+			assert.deepStrictEqual(visibleLines(frame.lines), ["base", "", "following"], name);
+		}
+	});
+
 	it("allocates vertical grow space deterministically", () => {
 		const frame = renderLayoutFrame(
 			new VStack([
@@ -46,6 +87,32 @@ describe("viewport layout", () => {
 		]);
 		renderLayoutFrame(root, 10, 3, () => {});
 		assert.strictEqual(renderCount, 1);
+	});
+
+	it("renders children of measured nested stacks once per frame", () => {
+		const counts = { vstackChild: 0, hstackChild: 0, scrollChild: 0 };
+		const counted = (key: keyof typeof counts, line: string) => ({
+			render: () => {
+				counts[key] += 1;
+				return [line];
+			},
+			invalidate: () => {},
+		});
+		const dock = new VStack([
+			counted("vstackChild", "status"),
+			new HStack([counted("hstackChild", "left"), { render: () => ["right"], invalidate: () => {} }], { gap: 1 }),
+			new ScrollView(counted("scrollChild", "scrolled"), { scrollbar: "always" }),
+		]);
+		const root = new VStack([
+			{ component: new Text("body", 0, 0), basis: 0, grow: 1 },
+			{ component: dock, basis: "auto" },
+		]);
+
+		const frame = renderLayoutFrame(root, 20, 5, () => {});
+
+		assert.deepStrictEqual(visibleLines(frame.lines), ["body", "", "status", "left right", "scrolled           ┃"]);
+		// The HStack child renders at the full width to measure, then at its allocated width.
+		assert.deepStrictEqual(counts, { vstackChild: 1, hstackChild: 2, scrollChild: 1 });
 	});
 
 	it("paints only clipped rows from very large scroll content", () => {
