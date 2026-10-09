@@ -118,7 +118,10 @@ export interface Component {
 	/**
 	 * Render the component to lines for the given viewport width
 	 * @param width - Current viewport width
-	 * @returns Array of strings, each representing a line
+	 * @returns Array of strings, each representing a line. Treat the array as read-only:
+	 * components may return the same cached array on every call, and parents detect
+	 * unchanged children by array identity. Return a new array when the content changes;
+	 * never mutate a returned array in place.
 	 */
 	render(width: number): string[];
 
@@ -358,6 +361,17 @@ type OverlayFocusRestorePolicy = "clear" | "preserve";
 export class Container implements Component {
 	children: Component[] = [];
 	private mouseLayout?: { width: number; children: Array<{ component: Component; height: number }> };
+	// Last render. Reused when the width, the children, and every child's returned array
+	// (identity and length) are unchanged, so an unchanged subtree costs one render call per
+	// child instead of copying every line on every frame.
+	private renderCache?: {
+		width: number;
+		children: Component[];
+		childLines: string[][];
+		childLengths: number[];
+		mouseChildren: Array<{ component: Component; height: number }>;
+		lines: string[];
+	};
 
 	addChild(component: Component): void {
 		this.children.push(component);
@@ -375,6 +389,7 @@ export class Container implements Component {
 	}
 
 	invalidate(): void {
+		this.renderCache = undefined;
 		for (const child of this.children) {
 			child.invalidate?.();
 		}
@@ -403,16 +418,56 @@ export class Container implements Component {
 	}
 
 	render(width: number): string[] {
-		const lines: string[] = [];
-		const mouseChildren: Array<{ component: Component; height: number }> = [];
-		for (const child of this.children) {
-			const childLines = child.render(width);
-			mouseChildren.push({ component: child, height: childLines.length });
-			for (const line of childLines) {
-				lines.push(line);
+		const children = this.children;
+		const cache = this.renderCache?.width === width ? this.renderCache : undefined;
+		const childLines = new Array<string[]>(children.length);
+		let total = 0;
+		// Leading children whose output is unchanged since the last render.
+		let unchanged = 0;
+		let inPrefix = cache !== undefined;
+		for (let index = 0; index < children.length; index++) {
+			const child = children[index]!;
+			const lines = child.render(width);
+			childLines[index] = lines;
+			total += lines.length;
+			if (
+				inPrefix &&
+				cache!.children[index] === child &&
+				cache!.childLines[index] === lines &&
+				cache!.childLengths[index] === lines.length
+			) {
+				unchanged++;
+			} else {
+				inPrefix = false;
 			}
 		}
+		if (cache && unchanged === children.length && unchanged === cache.children.length) return cache.lines;
+
+		// Streaming usually changes only the last child: copy the unchanged prefix from the cached
+		// array, then the changed tail, into one preallocated array (slice() plus push() would
+		// reallocate on the first push). The previous array stays intact for its holders.
+		const lines = new Array<string>(total);
+		let offset = 0;
+		if (unchanged > 0) {
+			const previous = cache!.lines;
+			for (let index = 0; index < unchanged; index++) offset += cache!.childLengths[index]!;
+			for (let line = 0; line < offset; line++) lines[line] = previous[line]!;
+		}
+		const mouseChildren = unchanged > 0 ? cache!.mouseChildren.slice(0, unchanged) : [];
+		for (let index = unchanged; index < children.length; index++) {
+			const rendered = childLines[index]!;
+			for (let line = 0; line < rendered.length; line++) lines[offset++] = rendered[line]!;
+			mouseChildren.push({ component: children[index]!, height: rendered.length });
+		}
 		this.mouseLayout = { width, children: mouseChildren };
+		this.renderCache = {
+			width,
+			children: [...children],
+			childLines,
+			childLengths: childLines.map((rendered) => rendered.length),
+			mouseChildren,
+			lines,
+		};
 		return lines;
 	}
 }

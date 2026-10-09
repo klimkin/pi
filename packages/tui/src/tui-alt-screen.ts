@@ -836,7 +836,13 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		const boxes = getLayoutBoxesAt(this.currentLayout, event.screenX, event.screenY);
 		for (const box of boxes) {
 			if (visited.has(box.component)) continue;
-			if (getLayoutNode(box.component) && box.component.handleMouse === Container.prototype.handleMouse) continue;
+			// Stacks and stacked Containers only route events to their children, which the hit path
+			// already visits directly.
+			if (
+				(getLayoutNode(box.component) || box.stacked) &&
+				box.component.handleMouse === Container.prototype.handleMouse
+			)
+				continue;
 			visited.add(box.component);
 			const result = dispatchMouseEvent(box.component, {
 				...event,
@@ -1146,7 +1152,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		);
 		if (visibleBottom < visibleTop) return undefined;
 		const pointerRow = Math.max(visibleTop, Math.min(visibleBottom, y));
-		const maxContentRow = Math.max(0, (box.scrollContentLines?.length ?? 1) - 1);
+		const maxContentRow = Math.max(0, (box.children[0]?.rect.height ?? box.scrollContentLines?.length ?? 1) - 1);
 		return {
 			row: Math.max(0, Math.min(maxContentRow, scrollView.scrollTop + pointerRow - box.rect.y)),
 			col: Math.max(0, Math.min(box.rect.width - 1, x - box.rect.x)),

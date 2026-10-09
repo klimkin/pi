@@ -4,12 +4,34 @@ import { HStack } from "../src/components/h-stack.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
 import { Text } from "../src/components/text.ts";
 import { VStack } from "../src/components/v-stack.ts";
-import { renderLayoutFrame } from "../src/layout.ts";
+import { getLayoutBoxesAt, getScrollViewBox, renderLayoutFrame } from "../src/layout.ts";
 import { encodeKitty, registerKittyImageMetadata } from "../src/terminal-image.ts";
+import { type Component, Container } from "../src/tui.ts";
 import { stripTerminalSequences } from "../src/utils.ts";
 
 function visibleLines(lines: string[]): string[] {
 	return lines.map((line) => stripTerminalSequences(line).trimEnd());
+}
+
+function fixedLines(lines: string[]): Component {
+	return { render: () => lines, invalidate: () => {} };
+}
+
+/** Renders like a plain Container but as one leaf, so layout cannot stack it. */
+function asLeaf(container: Container): Component {
+	return { render: (width) => container.render(width), invalidate: () => {} };
+}
+
+function transcriptDocument(imageLine: string): Container {
+	const message = new Container();
+	message.addChild(fixedLines(["message 1", "message 2"]));
+	message.addChild(new VStack([fixedLines(["stacked a"]), fixedLines(["stacked b"])], { gap: 1 }));
+	const document = new Container();
+	document.addChild(fixedLines(["header"]));
+	document.addChild(message);
+	document.addChild(fixedLines([imageLine, "", ""]));
+	document.addChild(fixedLines(["tail 1", "tail 2", "tail 3"]));
+	return document;
 }
 
 describe("viewport layout", () => {
@@ -72,6 +94,59 @@ describe("viewport layout", () => {
 		assert.deepStrictEqual(visibleLines(frame.lines), ["body", "", "status", "left right", "scrolled           ┃"]);
 		// The HStack child renders at the full width to measure, then at its allocated width.
 		assert.deepStrictEqual(counts, { vstackChild: 1, hstackChild: 2, scrollChild: 1 });
+	});
+
+	it("stacks plain Containers in scroll content with the same output as concatenating them", () => {
+		const imageId = 125;
+		const imageLine = encodeKitty("AAAA", { columns: 2, rows: 3, imageId, moveCursor: false });
+		registerKittyImageMetadata({ imageId, columns: 2, rows: 3, widthPx: 100, heightPx: 100 });
+		const document = transcriptDocument(imageLine);
+		const stacked = new ScrollView(document, { follow: "end" });
+		const leaf = new ScrollView(asLeaf(document), { follow: "end" });
+
+		// Follow-end puts the image's first two rows above the viewport, exercising the top crop.
+		for (const scrollTop of [undefined, 0, 2, 7]) {
+			if (scrollTop !== undefined) {
+				stacked.scrollTo(scrollTop);
+				leaf.scrollTo(scrollTop);
+			}
+			const stackedFrame = renderLayoutFrame(stacked, 20, 4, () => {});
+			const leafFrame = renderLayoutFrame(leaf, 20, 4, () => {});
+			assert.deepStrictEqual(stackedFrame.lines, leafFrame.lines, `scrollTop ${stacked.scrollTop}`);
+			assert.deepStrictEqual(
+				getScrollViewBox(stackedFrame, stacked)?.scrollContentLines,
+				getScrollViewBox(leafFrame, leaf)?.scrollContentLines,
+			);
+			assert.strictEqual(stackedFrame.root.children[0]?.stacked, true);
+		}
+		stacked.scrollTo(8);
+		assert.ok(renderLayoutFrame(stacked, 20, 4, () => {}).lines[0]?.includes("\x1b_G"));
+	});
+
+	it("hit-tests children of stacked scroll content as separate boxes", () => {
+		const document = transcriptDocument("image");
+		const frame = renderLayoutFrame(new ScrollView(document), 20, 12, () => {});
+		const path = getLayoutBoxesAt(frame, 0, 2);
+		// Only the scroll content is stacked; the message container below it stays one leaf box.
+		assert.strictEqual(path[0]?.component, document.children[1]);
+		assert.strictEqual(path[0]?.stacked, undefined);
+		assert.deepStrictEqual(visibleLines([...(path[0]?.lines ?? [])]), [
+			"message 1",
+			"message 2",
+			"stacked a",
+			"",
+			"stacked b",
+		]);
+		assert.strictEqual(path[1]?.component, document);
+		assert.strictEqual(path[1]?.stacked, true);
+	});
+
+	it("keeps plain Containers with an allocated height as clipped leaves", () => {
+		const container = new Container();
+		container.addChild(fixedLines(["one", "two", "three"]));
+		const frame = renderLayoutFrame(new VStack([{ component: container, basis: 2 }]), 10, 2, () => {});
+		assert.strictEqual(frame.root.children[0]?.stacked, undefined);
+		assert.deepStrictEqual(visibleLines(frame.lines), ["one", "two"]);
 	});
 
 	it("paints only clipped rows from very large scroll content", () => {

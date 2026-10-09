@@ -5,6 +5,13 @@
 ### Fixed
 
 - Fixed layout rendering the children of measured `VStack`, `HStack`, and `ScrollView` components twice per frame, which doubled render cost for the fullscreen input dock (editor, widgets, footer)
+- Fixed fullscreen frames copying the entire transcript on every render. `Container` reuses its previous output when no child changed and copies only the changed tail otherwise, and layout places the children of a plain `Container` scroll content as separate boxes; the large-transcript benchmark drops from 0.33 to 0.05 ms per steady frame and from 0.39 to 0.34 ms per streaming frame
+
+
+### Breaking Changes
+
+- Arrays returned by `Component.render()` are now read-only. `Container`, `Box`, and `Spacer` return the same cached array while their output is unchanged, and parents detect unchanged children by array identity. Components that modified the result of `super.render()` or a child's `render()` in place must copy it first, and components must return a new array when their content changes instead of mutating a previously returned one
+
 
 ## [1.3.0] - 2026-10-15
 

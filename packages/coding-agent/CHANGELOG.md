@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Reduced fullscreen render CPU in long sessions: unchanged messages, borders, and spacers now return cached lines, so frames no longer copy the whole transcript
+
 ## [1.3.0] - 2026-10-15
 
 ### New Features
