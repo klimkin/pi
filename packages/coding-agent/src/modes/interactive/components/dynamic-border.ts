@@ -10,16 +10,21 @@ import { theme } from "../theme/theme.ts";
  */
 export class DynamicBorder implements Component {
 	private color: (str: string) => string;
+	private cachedLines: string[] | undefined;
 
 	constructor(color: (str: string) => string = (str) => theme.fg("border", str)) {
 		this.color = color;
 	}
 
 	invalidate(): void {
-		// No cached state to invalidate currently
+		this.cachedLines = undefined;
 	}
 
 	render(width: number): string[] {
-		return [this.color("─".repeat(Math.max(1, width)))];
+		// Return a stable array while the line is unchanged so parents can reuse their output.
+		// Comparing the line (not just the width) keeps theme changes visible without invalidate().
+		const line = this.color("─".repeat(Math.max(1, width)));
+		if (this.cachedLines?.[0] !== line) this.cachedLines = [line];
+		return this.cachedLines;
 	}
 }

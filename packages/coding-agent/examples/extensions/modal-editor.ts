@@ -65,7 +65,7 @@ class ModalEditor extends CustomEditor {
 	}
 
 	render(width: number): string[] {
-		const lines = super.render(width);
+		const lines = [...super.render(width)];
 		if (lines.length === 0) return lines;
 
 		// Add mode indicator to bottom border

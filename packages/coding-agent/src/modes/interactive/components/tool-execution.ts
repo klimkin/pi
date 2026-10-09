@@ -34,6 +34,8 @@ export class ToolExecutionComponent extends Container {
 	private contentTextRegion: MouseRegion;
 	private selfRenderContainer: Container;
 	private selfRenderHeight = 0;
+	private selfRenderCache?: { parts: string[][]; lengths: number[]; lines: string[] };
+	private readonly selfRenderEmpty: string[] = [];
 	private callRendererComponent?: Component;
 	private resultRendererComponent?: Component;
 	private rendererState: any = {};
@@ -234,14 +236,32 @@ export class ToolExecutionComponent extends Container {
 	override render(width: number): string[] {
 		if (this.argsPending) this.updateDisplay();
 		if (this.hideComponent) {
-			return [];
+			return this.selfRenderEmpty;
 		}
 
 		if (this.hasRendererDefinition() && this.getRenderShell() === "self") {
 			const contentLines = this.selfRenderContainer.render(width);
 			this.selfRenderHeight = contentLines.length;
 			if (contentLines.length === 0 && this.imageComponents.length === 0) {
-				return [];
+				return this.selfRenderEmpty;
+			}
+
+			// Parts in output order; the combined lines are reused while every part is the same
+			// array (identity and length) as last time, keeping the result stable for parent caches.
+			const parts: string[][] = [contentLines];
+			for (let i = 0; i < this.imageComponents.length; i++) {
+				const spacer = this.imageSpacers[i];
+				if (spacer) parts.push(spacer.render(width));
+				const imageComponent = this.imageComponents[i];
+				if (imageComponent) parts.push(imageComponent.render(width));
+			}
+			const cache = this.selfRenderCache;
+			if (
+				cache &&
+				cache.parts.length === parts.length &&
+				parts.every((part, index) => part === cache.parts[index] && part.length === cache.lengths[index])
+			) {
+				return cache.lines;
 			}
 
 			const lines: string[] = [];
@@ -249,16 +269,8 @@ export class ToolExecutionComponent extends Container {
 				lines.push("");
 				lines.push(...contentLines);
 			}
-			for (let i = 0; i < this.imageComponents.length; i++) {
-				const spacer = this.imageSpacers[i];
-				if (spacer) {
-					lines.push(...spacer.render(width));
-				}
-				const imageComponent = this.imageComponents[i];
-				if (imageComponent) {
-					lines.push(...imageComponent.render(width));
-				}
-			}
+			for (const part of parts.slice(1)) lines.push(...part);
+			this.selfRenderCache = { parts, lengths: parts.map((part) => part.length), lines };
 			return lines;
 		}
 

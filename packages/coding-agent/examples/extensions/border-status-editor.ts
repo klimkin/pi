@@ -124,7 +124,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			render(width: number): string[] {
-				const lines = super.render(width);
+				const lines = [...super.render(width)];
 				if (lines.length < 2) return lines;
 
 				const thm = ctx.ui.theme;
