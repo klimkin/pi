@@ -76,7 +76,7 @@ class RadiusLoginMenuComponent extends ExtensionSelectorComponent {
 	}
 
 	override render(width: number): string[] {
-		const lines = super.render(width);
+		const lines = [...super.render(width)];
 		const { label, text } = this.radiusOption;
 		const selectedLine = new Text(theme.fg("accent", "→ ") + theme.fg("accent", label), 1, 0).render(width)[0];
 		const index = selectedLine === undefined ? -1 : lines.indexOf(selectedLine);
