@@ -173,6 +173,33 @@ describe("ToolExecutionComponent parity", () => {
 		expect(component.render(120)).toEqual(initial);
 	});
 
+	test("keys self-rendered lines on width even when part arrays stay identical", () => {
+		const lines = ["fixed"];
+		const component = new ToolExecutionComponent(
+			"tool",
+			"tool-self-width",
+			{},
+			{},
+			{ renderShell: "self", renderCall: () => ({ render: () => lines, invalidate: () => {} }) },
+			createFakeTui(),
+			process.cwd(),
+		);
+		// Isolate the width key from Container's own width-dependent array identity.
+		const shell = Reflect.get(component, "selfRenderContainer") as { render: (width: number) => string[] };
+		const render = vi.spyOn(shell, "render").mockReturnValue(lines);
+		try {
+			const wide = component.render(120);
+			expect(component.render(120)).toBe(wide);
+			const narrow = component.render(80);
+			expect(narrow).not.toBe(wide);
+			expect(narrow).toEqual(wide);
+			expect(component.render(80)).toBe(narrow);
+			expect(component.render(120)).not.toBe(narrow);
+		} finally {
+			render.mockRestore();
+		}
+	});
+
 	test("returns a stable empty array when the component is hidden", () => {
 		const component = new ToolExecutionComponent(
 			"tool",

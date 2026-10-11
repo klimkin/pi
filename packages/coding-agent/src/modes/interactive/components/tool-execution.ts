@@ -34,7 +34,7 @@ export class ToolExecutionComponent extends Container {
 	private contentTextRegion: MouseRegion;
 	private selfRenderContainer: Container;
 	private selfRenderHeight = 0;
-	private selfRenderCache?: { parts: string[][]; lengths: number[]; lines: string[] };
+	private selfRenderCache?: { width: number; parts: string[][]; lengths: number[]; lines: string[] };
 	private readonly selfRenderEmpty: string[] = [];
 	private callRendererComponent?: Component;
 	private resultRendererComponent?: Component;
@@ -248,12 +248,16 @@ export class ToolExecutionComponent extends Container {
 				if (imageComponent) parts.push(imageComponent.render(width));
 			}
 			const cache = this.selfRenderCache;
-			if (
-				cache &&
-				cache.parts.length === parts.length &&
-				parts.every((part, index) => part === cache.parts[index] && part.length === cache.lengths[index])
-			) {
-				return cache.lines;
+			if (cache && cache.width === width && cache.parts.length === parts.length) {
+				let unchanged = true;
+				for (let index = 0; index < parts.length; index++) {
+					const part = parts[index]!;
+					if (part !== cache.parts[index] || part.length !== cache.lengths[index]) {
+						unchanged = false;
+						break;
+					}
+				}
+				if (unchanged) return cache.lines;
 			}
 
 			const lines: string[] = [];
@@ -262,7 +266,7 @@ export class ToolExecutionComponent extends Container {
 				lines.push(...contentLines);
 			}
 			for (const part of parts.slice(1)) lines.push(...part);
-			this.selfRenderCache = { parts, lengths: parts.map((part) => part.length), lines };
+			this.selfRenderCache = { width, parts, lengths: parts.map((part) => part.length), lines };
 			return lines;
 		}
 
