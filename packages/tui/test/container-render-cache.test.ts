@@ -4,6 +4,9 @@ import { Box } from "../src/components/box.ts";
 import { Spacer } from "../src/components/spacer.ts";
 import { Text } from "../src/components/text.ts";
 import { type Component, Container } from "../src/tui.ts";
+import { TuiAltScreen } from "../src/tui-alt-screen.ts";
+import { TuiMainScreen } from "../src/tui-main-screen.ts";
+import { VirtualTerminal } from "./virtual-terminal.ts";
 
 /** Leaf that returns a stable array until replaced, like Text or Markdown. */
 class StableLines implements Component {
@@ -73,6 +76,28 @@ describe("Container render cache", () => {
 		container.invalidate();
 		assert.notStrictEqual(container.render(10), lines);
 	});
+
+	for (const Renderer of [TuiMainScreen, TuiAltScreen]) {
+		it(`clears ${Renderer.name}'s inherited cache even when child arrays stay stable`, () => {
+			const tui = new Renderer(new VirtualTerminal(20, 3));
+			let invalidations = 0;
+			const lines = ["stable"];
+			tui.addChild({
+				render: () => lines,
+				invalidate: () => {
+					invalidations++;
+				},
+			});
+			const initial = tui.render(20);
+			assert.strictEqual(tui.render(20), initial);
+			tui.invalidate();
+			assert.strictEqual(invalidations, 1);
+			const refreshed = tui.render(20);
+			assert.notStrictEqual(refreshed, initial);
+			assert.deepStrictEqual(refreshed, initial);
+			assert.strictEqual(tui.render(20), refreshed);
+		});
+	}
 
 	it("keeps nested unchanged containers stable", () => {
 		const message = new Container();

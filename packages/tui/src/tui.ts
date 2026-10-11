@@ -364,7 +364,7 @@ export class Container implements Component {
 	// Last render. Reused when the width, the children, and every child's returned array
 	// (identity and length) are unchanged, so an unchanged subtree costs one render call per
 	// child instead of copying every line on every frame.
-	private renderCache?: {
+	protected renderCache?: {
 		width: number;
 		children: Component[];
 		childLines: string[][];
@@ -980,6 +980,7 @@ export abstract class TuiBase extends Container implements TUI {
 	}
 
 	override invalidate(): void {
+		this.renderCache = undefined;
 		for (const root of this.getMountedRoots()) root.invalidate();
 		for (const overlay of this.overlayStack) overlay.component.invalidate();
 	}
