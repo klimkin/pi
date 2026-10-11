@@ -35,8 +35,8 @@ export interface LayoutBox {
 	scrollContentLines?: readonly string[];
 	/** Plain Container laid out as stacked child boxes instead of one concatenated leaf. */
 	stacked?: boolean;
-	/** Rendered lines of a layout-node child of a stacked box, for scroll content lookups. */
-	sourceLines?: readonly string[];
+	/** Render a layout-node child of a stacked box on demand for scroll content lookups. */
+	sourceLines?: () => readonly string[];
 	layer: number;
 }
 
@@ -163,8 +163,8 @@ function layoutStackedContainer(
 	let childY = y;
 	for (const child of container.children) {
 		const childBox = layoutComponent(context, child, x, childY, width, undefined, clip);
-		// Stacks and scroll views have no lines of their own; keep their rendering for lookups.
-		if (!childBox.lines) childBox.sourceLines = renderCached(context, child, width);
+		// Stacks and scroll views have no lines of their own; render them only for lookups.
+		if (!childBox.lines) childBox.sourceLines = () => renderCached(context, child, width);
 		box.children.push(withParent(childBox, box));
 		childY += childBox.rect.height;
 	}
@@ -177,7 +177,7 @@ function layoutStackedContainer(
 function collectStackedLines(box: LayoutBox): string[] {
 	const out: string[] = [];
 	for (const child of box.children) {
-		const lines = child.lines ?? child.sourceLines ?? [];
+		const lines = child.lines ?? child.sourceLines?.() ?? [];
 		for (let row = 0; row < child.rect.height; row++) out.push(lines[row] ?? "");
 	}
 	return out;
@@ -196,7 +196,7 @@ function scrollContentLineAt(box: LayoutBox, row: number): string | undefined {
 		const child = children[mid]!;
 		if (y < child.rect.y) high = mid - 1;
 		else if (y >= child.rect.y + child.rect.height) low = mid + 1;
-		else return (child.lines ?? child.sourceLines)?.[y - child.rect.y];
+		else return (child.lines ?? child.sourceLines?.())?.[y - child.rect.y];
 	}
 	return undefined;
 }

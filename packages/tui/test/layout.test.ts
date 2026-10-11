@@ -159,6 +159,81 @@ describe("viewport layout", () => {
 		assert.ok(renderLayoutFrame(stacked, 20, 4, () => {}).lines[0]?.includes("\x1b_G"));
 	});
 
+	it("collects offscreen stack lines only on demand and caches them within the frame", () => {
+		let reads = 0;
+		let renders = 0;
+		const lines = ["offscreen"];
+		Object.defineProperty(lines, 0, {
+			get: () => {
+				reads++;
+				return "offscreen";
+			},
+		});
+		const document = new Container();
+		document.addChild(fixedLines(["visible"]));
+		document.addChild(
+			new VStack([
+				{
+					render: () => {
+						renders++;
+						return lines;
+					},
+					invalidate: () => {},
+				},
+			]),
+		);
+		const scroll = new ScrollView(document);
+		const frame = renderLayoutFrame(scroll, 20, 1, () => {});
+		assert.deepStrictEqual(frame.lines, ["visible"]);
+		assert.strictEqual(reads, 0);
+		assert.strictEqual(renders, 1);
+		const source = frame.root.children[0]?.children[1]?.sourceLines;
+		assert.ok(source);
+		const collected = source();
+		assert.deepStrictEqual(collected, ["offscreen"]);
+		assert.strictEqual(source(), collected);
+		assert.strictEqual(reads, 1);
+		assert.deepStrictEqual(getScrollViewBox(frame, scroll)?.scrollContentLines, ["visible", "offscreen"]);
+		assert.strictEqual(reads, 1);
+		assert.strictEqual(renders, 1);
+	});
+
+	it("preserves stack and scroll child content across stacked transcript lookups", () => {
+		const document = new Container();
+		document.addChild(fixedLines(["header"]));
+		document.addChild(new VStack([fixedLines(["a"]), fixedLines(["b"])], { gap: 1 }));
+		document.addChild(new HStack([{ component: fixedLines(["left"]), basis: 6 }, fixedLines(["right"])]));
+		document.addChild(new ScrollView(fixedLines(["inner", "tail"])));
+		const stacked = new ScrollView(document);
+		const leaf = new ScrollView(asLeaf(document));
+		for (const offset of [0, 1, 2, 4]) {
+			stacked.scrollTo(offset);
+			leaf.scrollTo(offset);
+			const frame = renderLayoutFrame(stacked, 20, 3, () => {});
+			const expected = renderLayoutFrame(leaf, 20, 3, () => {});
+			assert.deepStrictEqual(frame.lines, expected.lines);
+			assert.deepStrictEqual(frame.root.scrollContentLines, expected.root.scrollContentLines);
+		}
+	});
+
+	it("crops offscreen image anchors through lazy stack content", () => {
+		const imageId = 126;
+		const imageLine = encodeKitty("AAAA", { columns: 2, rows: 3, imageId, moveCursor: false });
+		registerKittyImageMetadata({ imageId, columns: 2, rows: 3, widthPx: 100, heightPx: 100 });
+		const document = new Container();
+		document.addChild(new VStack([fixedLines([imageLine, "", ""])]));
+		document.addChild(fixedLines(["tail", "end"]));
+		const stacked = new ScrollView(document);
+		const leaf = new ScrollView(asLeaf(document));
+		for (const offset of [1, 2]) {
+			stacked.scrollTo(offset);
+			leaf.scrollTo(offset);
+			const frame = renderLayoutFrame(stacked, 20, 2, () => {});
+			assert.deepStrictEqual(frame.lines, renderLayoutFrame(leaf, 20, 2, () => {}).lines);
+			assert.ok(frame.lines[0]?.includes("\x1b_G"));
+		}
+	});
+
 	it("hit-tests children of stacked scroll content as separate boxes", () => {
 		const document = transcriptDocument("image");
 		const frame = renderLayoutFrame(new ScrollView(document), 20, 12, () => {});
