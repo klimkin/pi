@@ -159,6 +159,47 @@ describe("viewport layout", () => {
 		assert.ok(renderLayoutFrame(stacked, 20, 4, () => {}).lines[0]?.includes("\x1b_G"));
 	});
 
+	it("keeps large scroll Containers as cached leaves", () => {
+		for (const nested of [false, true]) {
+			const document = new Container();
+			for (let index = 0; index < 400; index++) {
+				const child = fixedLines([`message ${index}`, "detail"]);
+				document.addChild(nested ? new VStack([child]) : child);
+			}
+			const scroll = new ScrollView(document, { follow: "end" });
+			const frame = renderLayoutFrame(scroll, 20, 3, () => {});
+			const content = frame.root.children[0];
+			assert.strictEqual(content?.stacked, undefined);
+			assert.deepStrictEqual(content?.children, []);
+			assert.strictEqual(content?.rect.height, 800);
+			assert.deepStrictEqual(frame.lines, ["detail", "message 399", "detail"]);
+			assert.strictEqual(frame.root.scrollContentLines, content?.lines);
+			assert.deepStrictEqual(frame.root.scrollContentLines, document.render(20));
+			if (!nested) {
+				const next = renderLayoutFrame(scroll, 20, 3, () => {});
+				assert.strictEqual(next.root.scrollContentLines, frame.root.scrollContentLines);
+			}
+		}
+	});
+
+	it("preserves scroll content when child changes cross the stacking limit", () => {
+		const document = new Container();
+		for (let index = 0; index < 8; index++) document.addChild(fixedLines([`message ${index}`]));
+		const scroll = new ScrollView(document, { follow: "end" });
+		const render = (stacked: boolean) => {
+			const frame = renderLayoutFrame(scroll, 20, 3, () => {});
+			assert.strictEqual(frame.root.children[0]?.stacked === true, stacked);
+			assert.deepStrictEqual(frame.lines, document.render(20).slice(-3));
+			assert.deepStrictEqual(frame.root.scrollContentLines, document.render(20));
+		};
+		render(true);
+		const tail = fixedLines(["tail"]);
+		document.addChild(tail);
+		render(false);
+		document.removeChild(tail);
+		render(true);
+	});
+
 	it("collects offscreen stack lines only on demand and caches them within the frame", () => {
 		let reads = 0;
 		let renders = 0;

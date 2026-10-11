@@ -139,12 +139,15 @@ function updateClips(box: LayoutBox, parentClip: LayoutRect): void {
  * A Container with the default render and mouse handling only concatenates its children.
  * As direct scroll content (the fullscreen transcript document), layout places its children
  * as separate boxes instead, so a streaming update does not copy the whole history into the
- * document's array as well. Only one level is stacked: a box per message costs more than
- * copying a message's lines, so the children themselves render as ordinary leaves.
+ * document's array as well. Limit this to eight direct children: document sections such as
+ * header, resources, and chat keep a bounded box cost even as the history grows. Containers
+ * with more children use their cached concatenated lines; a box per message costs more than
+ * copying its lines. Only one level is stacked; child Containers render as ordinary leaves.
  */
 function isStackableContainer(component: Component): component is Container {
 	return (
 		component instanceof Container &&
+		component.children.length <= 8 &&
 		component.render === Container.prototype.render &&
 		component.handleMouse === Container.prototype.handleMouse
 	);
