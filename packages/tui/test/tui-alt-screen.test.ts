@@ -1957,6 +1957,56 @@ describe("TuiAltScreen", () => {
 		tui.stop();
 	});
 
+	it("dispatches stacked transcript clicks once without rendering children on misses", async () => {
+		const terminal = new VirtualTerminal(20, 3);
+		const tui = new TuiAltScreen(terminal);
+		const document = new Container();
+		const renders = [0, 0, 0];
+		const moves = [0, 0, 0];
+		const clicks: Array<{ child: number; x: number; y: number }> = [];
+		for (let child = 0; child < 3; child++) {
+			const lines = [`message ${child}`, "detail"];
+			const message = new Container();
+			message.addChild(
+				new MouseRegion(
+					{
+						render: () => {
+							renders[child]++;
+							return lines;
+						},
+						invalidate: () => {},
+					},
+					(event) => {
+						if (event.type === "move") moves[child]++;
+						if (event.type !== "click") return undefined;
+						clicks.push({ child, x: event.x, y: event.y });
+						return { handled: true };
+					},
+				),
+			);
+			document.addChild(message);
+		}
+		const scroll = new ScrollView(document, { primary: true });
+		tui.setLayoutRoot(scroll);
+		tui.start();
+		try {
+			await terminal.waitForRender();
+			scroll.scrollTo(1);
+			tui.renderNow();
+			const before = [...renders];
+			terminal.sendInput("\x1b[<35;2;2M");
+			assert.deepStrictEqual(moves, [0, 1, 0]);
+			assert.deepStrictEqual(renders, before);
+
+			terminal.sendInput("\x1b[<0;2;2M");
+			terminal.sendInput("\x1b[<0;2;2m");
+			assert.deepStrictEqual(clicks, [{ child: 1, x: 1, y: 0 }]);
+			assert.deepStrictEqual(renders, before);
+		} finally {
+			tui.stop();
+		}
+	});
+
 	it("focuses and captures drag gestures for mouse-aware components", async () => {
 		const terminal = new VirtualTerminal(20, 2);
 		const tui = new TuiAltScreen(terminal);
