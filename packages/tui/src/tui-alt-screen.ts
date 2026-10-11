@@ -619,7 +619,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		if (!search) return false;
 		const scrollView = layout.primaryScrollView ?? this.implicitScrollView;
 		const box = getScrollViewBox(layout, scrollView);
-		const lines = box?.scrollContentLines;
+		const lines = search.query.trim() ? box?.scrollContentLines : undefined;
 		if (!lines || !search.query.trim()) {
 			search.matches = [];
 			search.selectedIndex = -1;

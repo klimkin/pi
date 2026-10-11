@@ -20,7 +20,7 @@ import {
 	resetCapabilitiesCache,
 	setCapabilities,
 } from "../src/terminal-image.ts";
-import { renderFakeCursor, type TuiMouseEvent } from "../src/tui.ts";
+import { Container, renderFakeCursor, type TuiMouseEvent } from "../src/tui.ts";
 import { TuiAltScreen } from "../src/tui-alt-screen.ts";
 import { stripTerminalSequences, visibleWidth } from "../src/utils.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
@@ -702,6 +702,41 @@ describe("TuiAltScreen", () => {
 		assert.ok(populated[1]?.includes("1/2"));
 		assert.ok(populatedRender[1]?.includes("\x1b[2m 1/2 \x1b[22m"));
 		assert.ok(!populated.some((line) => line.includes("Find in transcript")));
+	});
+
+	it("reads offscreen stacked transcript lines only when the search query has text", async () => {
+		const terminal = new VirtualTerminal(60, 8);
+		const tui = new TuiAltScreen(terminal);
+		const lines = Array.from({ length: 20 }, () => "visible");
+		let offscreenReads = 0;
+		Object.defineProperty(lines, 19, {
+			get: () => {
+				offscreenReads++;
+				return "needle";
+			},
+		});
+		const document = new Container();
+		document.addChild({ render: () => lines, invalidate: () => {} });
+		tui.setLayoutRoot(new ScrollView(document, { primary: true }));
+		tui.start();
+		try {
+			await terminal.waitForRender();
+			terminal.sendInput("\x1b[102;6u");
+			await terminal.waitForRender();
+			tui.renderNow();
+			assert.strictEqual(offscreenReads, 0);
+
+			terminal.sendInput("   ");
+			await terminal.waitForRender();
+			assert.strictEqual(offscreenReads, 0);
+
+			terminal.sendInput("needle");
+			await terminal.waitForRender();
+			assert.ok(offscreenReads > 0);
+			assert.ok(terminal.getViewport().some((line) => line.includes("1/1")));
+		} finally {
+			tui.stop();
+		}
 	});
 
 	it("navigates transcript search with hoverable arrow buttons and toggles it with its shortcut", async () => {
