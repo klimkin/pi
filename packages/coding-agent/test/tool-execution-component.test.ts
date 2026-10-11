@@ -114,7 +114,9 @@ describe("ToolExecutionComponent parity", () => {
 			createFakeTui(),
 			process.cwd(),
 		);
-		expect(component.render(120)).toEqual([]);
+		const empty = component.render(120);
+		expect(empty).toEqual([]);
+		expect(component.render(120)).toBe(empty);
 
 		component.updateResult(
 			{
@@ -125,7 +127,71 @@ describe("ToolExecutionComponent parity", () => {
 			false,
 		);
 
-		expect(component.render(120)).toEqual([]);
+		expect(component.render(120)).toBe(empty);
+	});
+
+	test("reuses self-rendered lines until image parts change", () => {
+		setCapabilities({ images: "kitty", trueColor: true, hyperlinks: true });
+		const call = new Text("custom call", 0, 0);
+		const component = new ToolExecutionComponent(
+			"custom_tool",
+			"tool-self-cache",
+			{},
+			{},
+			{ ...createBaseToolDefinition(), renderShell: "self", renderCall: () => call },
+			createFakeTui(),
+			process.cwd(),
+		);
+		const initial = component.render(120);
+		expect(initial.map((line) => line.trimEnd())).toEqual(["", "custom call"]);
+		expect(component.render(120)).toBe(initial);
+
+		const image = {
+			type: "image",
+			mimeType: "image/png",
+			data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII=",
+		};
+		component.updateResult({ content: [image], isError: false });
+		const withImage = component.render(120);
+		expect(withImage).not.toBe(initial);
+		expect(withImage.slice(0, 3).map((line) => line.trimEnd())).toEqual(["", "custom call", ""]);
+		expect(withImage[3]).toContain("\x1b_G");
+		expect(component.render(120)).toBe(withImage);
+		expect(initial.map((line) => line.trimEnd())).toEqual(["", "custom call"]);
+
+		component.updateResult({ content: [image, image], isError: false });
+		const withTwoImages = component.render(120);
+		expect(withTwoImages).not.toBe(withImage);
+		expect(withTwoImages.filter((line) => line.includes("\x1b_G"))).toHaveLength(2);
+		expect(component.render(120)).toBe(withTwoImages);
+
+		component.setShowImages(false);
+		const withoutImages = component.render(120);
+		expect(withoutImages.some((line) => line.includes("\x1b_G"))).toBe(false);
+		expect(component.render(120)).toBe(withoutImages);
+		component.updateResult({ content: [], isError: false });
+		expect(component.render(120)).toEqual(initial);
+	});
+
+	test("returns a stable empty array when the component is hidden", () => {
+		const component = new ToolExecutionComponent(
+			"tool",
+			"tool-hidden",
+			{},
+			{},
+			undefined,
+			createFakeTui(),
+			process.cwd(),
+		);
+		const visible = component.render(120);
+		// Exercise the hidden-state guard directly; fallback renderers always provide content.
+		Reflect.set(component, "hideComponent", true);
+		const empty = component.render(120);
+		expect(empty).toEqual([]);
+		expect(component.render(120)).toBe(empty);
+		expect(component.render(80)).toBe(empty);
+		Reflect.set(component, "hideComponent", false);
+		expect(component.render(120)).toBe(visible);
 	});
 
 	test("uses built-in rendering for built-in overrides without custom renderers", () => {
