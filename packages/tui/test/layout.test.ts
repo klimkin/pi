@@ -4,7 +4,7 @@ import { HStack } from "../src/components/h-stack.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
 import { Text } from "../src/components/text.ts";
 import { VStack } from "../src/components/v-stack.ts";
-import { getLayoutBoxesAt, getScrollViewBox, renderLayoutFrame } from "../src/layout.ts";
+import { getLayoutBoxesAt, getScrollViewBox, getScrollViewsAt, renderLayoutFrame } from "../src/layout.ts";
 import { encodeKitty, registerKittyImageMetadata } from "../src/terminal-image.ts";
 import { type Component, Container } from "../src/tui.ts";
 import { stripTerminalSequences } from "../src/utils.ts";
@@ -291,6 +291,51 @@ describe("viewport layout", () => {
 		]);
 		assert.strictEqual(path[1]?.component, document);
 		assert.strictEqual(path[1]?.stacked, true);
+	});
+
+	it("hit-tests ordered children without visiting offscreen clips", () => {
+		const children = Array.from({ length: 512 }, () => new ScrollView(fixedLines(["row"])));
+		const scroll = new ScrollView(new VStack(children));
+		renderLayoutFrame(scroll, 20, 3, () => {});
+		scroll.scrollTo(256);
+		const frame = renderLayoutFrame(scroll, 20, 3, () => {});
+		let clipReads = 0;
+		for (const child of frame.root.children[0]!.children) {
+			const clip = child.clip;
+			Object.defineProperty(child, "clip", {
+				get: () => {
+					clipReads++;
+					return clip;
+				},
+			});
+		}
+		assert.strictEqual(getLayoutBoxesAt(frame, 0, 1)[1]?.component, children[257]);
+		assert.strictEqual(clipReads, 1);
+		clipReads = 0;
+		assert.deepStrictEqual(getScrollViewsAt(frame, 0, 1), [children[257], scroll]);
+		assert.strictEqual(clipReads, 1);
+	});
+
+	it("preserves hit paths through empty children, gaps, and horizontal siblings", () => {
+		const left = new ScrollView(fixedLines(["left", "left"]));
+		const right = new ScrollView(fixedLines(["right", "right"]));
+		const row = new HStack([
+			{ component: left, basis: 5 },
+			{ component: right, basis: 5 },
+		]);
+		const document = new Container();
+		document.addChild(fixedLines([]));
+		document.addChild(new VStack([fixedLines([]), row, fixedLines([])], { gap: 1 }));
+		document.addChild(fixedLines([]));
+		const scroll = new ScrollView(document);
+		const frame = renderLayoutFrame(scroll, 10, 4, () => {});
+		assert.deepStrictEqual(getScrollViewsAt(frame, 0, 0), [scroll]);
+		assert.deepStrictEqual(getScrollViewsAt(frame, 0, 1), [left, scroll]);
+		assert.deepStrictEqual(getScrollViewsAt(frame, 5, 2), [right, scroll]);
+		assert.strictEqual(getLayoutBoxesAt(frame, 5, 2)[1]?.component, right);
+		assert.deepStrictEqual(getScrollViewsAt(frame, 0, 3), [scroll]);
+		assert.deepStrictEqual(getLayoutBoxesAt(frame, 10, 1), []);
+		assert.deepStrictEqual(getLayoutBoxesAt(frame, 0, 4), []);
 	});
 
 	it("keeps plain Containers with an allocated height as clipped leaves", () => {

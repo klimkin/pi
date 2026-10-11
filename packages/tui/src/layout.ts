@@ -35,6 +35,8 @@ export interface LayoutBox {
 	scrollContentLines?: readonly string[];
 	/** Plain Container laid out as stacked child boxes instead of one concatenated leaf. */
 	stacked?: boolean;
+	/** Children occupy disjoint row ranges in ascending order. */
+	childrenSortedByY?: boolean;
 	/** Render a layout-node child of a stacked box on demand for scroll content lookups. */
 	sourceLines?: () => readonly string[];
 	layer: number;
@@ -162,7 +164,15 @@ function layoutStackedContainer(
 	clip: LayoutRect,
 ): LayoutBox {
 	const rect = { x, y, width, height: 0 };
-	const box: LayoutBox = { component: container, rect, clip, children: [], stacked: true, layer: 0 };
+	const box: LayoutBox = {
+		component: container,
+		rect,
+		clip,
+		children: [],
+		stacked: true,
+		childrenSortedByY: true,
+		layer: 0,
+	};
 	let childY = y;
 	for (const child of container.children) {
 		const childBox = layoutComponent(context, child, x, childY, width, undefined, clip);
@@ -186,12 +196,9 @@ function collectStackedLines(box: LayoutBox): string[] {
 	return out;
 }
 
-/** Content line at a row of a scroll box without materializing a stacked content's full lines. */
-function scrollContentLineAt(box: LayoutBox, row: number): string | undefined {
-	const content = box.children[0];
-	if (!content?.stacked) return box.scrollContentLines?.[row];
-	const y = content.rect.y + row;
-	const children = content.children;
+/** Find the only child that can contain a row in a vertically ordered box. */
+function childAtRow(box: LayoutBox, y: number): LayoutBox | undefined {
+	const children = box.children;
 	let low = 0;
 	let high = children.length - 1;
 	while (low <= high) {
@@ -199,9 +206,18 @@ function scrollContentLineAt(box: LayoutBox, row: number): string | undefined {
 		const child = children[mid]!;
 		if (y < child.rect.y) high = mid - 1;
 		else if (y >= child.rect.y + child.rect.height) low = mid + 1;
-		else return (child.lines ?? child.sourceLines?.())?.[y - child.rect.y];
+		else return child;
 	}
 	return undefined;
+}
+
+/** Content line at a row of a scroll box without materializing a stacked content's full lines. */
+function scrollContentLineAt(box: LayoutBox, row: number): string | undefined {
+	const content = box.children[0];
+	if (!content?.stacked) return box.scrollContentLines?.[row];
+	const y = content.rect.y + row;
+	const child = childAtRow(content, y);
+	return child ? (child.lines ?? child.sourceLines?.())?.[y - child.rect.y] : undefined;
 }
 
 function layoutComponent(
@@ -285,6 +301,7 @@ function layoutComponent(
 			rect,
 			clip: intersect(clip, rect),
 			children: [],
+			childrenSortedByY: true,
 			layer: 0,
 		};
 		let childY = y;
@@ -524,7 +541,12 @@ export function getLayoutBoxesAt(frame: LayoutFrame, x: number, y: number): Layo
 	const visit = (box: LayoutBox, depth: number): void => {
 		if (!containsPoint(box.clip, x, y)) return;
 		result.push({ box, depth });
-		for (const child of box.children) visit(child, depth + 1);
+		if (box.childrenSortedByY) {
+			const child = childAtRow(box, y);
+			if (child) visit(child, depth + 1);
+		} else {
+			for (const child of box.children) visit(child, depth + 1);
+		}
 	};
 	visit(frame.root, 0);
 	result.sort((a, b) => b.box.layer - a.box.layer || b.depth - a.depth);
@@ -548,7 +570,12 @@ export function getScrollViewsAt(frame: LayoutFrame, x: number, y: number): Scro
 	const visit = (box: LayoutBox, depth: number): void => {
 		if (!containsPoint(box.clip, x, y)) return;
 		if (box.scrollView && containsPoint(box.rect, x, y)) result.push({ scrollView: box.scrollView, depth });
-		for (const child of box.children) visit(child, depth + 1);
+		if (box.childrenSortedByY) {
+			const child = childAtRow(box, y);
+			if (child) visit(child, depth + 1);
+		} else {
+			for (const child of box.children) visit(child, depth + 1);
+		}
 	};
 	visit(frame.root, 0);
 	result.sort((a, b) => b.depth - a.depth);
