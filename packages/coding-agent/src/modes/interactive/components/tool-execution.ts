@@ -28,13 +28,25 @@ export interface ToolExecutionOptions {
 	outputPad?: number;
 }
 
+// Initial values of the self-render cache; never returned or mutated.
+const NO_LINES: string[] = [];
+const NO_PARTS: string[][] = [];
+const NO_LENGTHS: number[] = [];
+
 export class ToolExecutionComponent extends Container {
 	private contentBox: Box;
 	private contentText: Text;
 	private contentTextRegion: MouseRegion;
 	private selfRenderContainer: Container;
 	private selfRenderHeight = 0;
-	private selfRenderCache?: { width: number; parts: string[][]; lengths: number[]; lines: string[] };
+	private readonly selfRenderCache = {
+		width: -1,
+		content: NO_LINES,
+		contentLength: 0,
+		images: NO_PARTS,
+		imageLengths: NO_LENGTHS,
+		lines: NO_LINES,
+	};
 	private readonly selfRenderEmpty: string[] = [];
 	private callRendererComponent?: Component;
 	private resultRendererComponent?: Component;
@@ -238,21 +250,30 @@ export class ToolExecutionComponent extends Container {
 				return this.selfRenderEmpty;
 			}
 
-			// Parts in output order; the combined lines are reused while every part is the same
-			// array (identity and length) as last time, keeping the result stable for parent caches.
-			const parts: string[][] = [contentLines];
-			for (let i = 0; i < this.imageComponents.length; i++) {
-				const spacer = this.imageSpacers[i];
-				if (spacer) parts.push(spacer.render(width));
-				const imageComponent = this.imageComponents[i];
-				if (imageComponent) parts.push(imageComponent.render(width));
+			// Reused while the width and every rendered part are the same arrays (identity and length) as
+			// last time, keeping the result stable for parent caches. Images are rare, so the image parts
+			// array is only built when there are images.
+			let images = NO_PARTS;
+			if (this.imageComponents.length > 0) {
+				images = [];
+				for (let i = 0; i < this.imageComponents.length; i++) {
+					const spacer = this.imageSpacers[i];
+					if (spacer) images.push(spacer.render(width));
+					const imageComponent = this.imageComponents[i];
+					if (imageComponent) images.push(imageComponent.render(width));
+				}
 			}
 			const cache = this.selfRenderCache;
-			if (cache && cache.width === width && cache.parts.length === parts.length) {
+			if (
+				cache.width === width &&
+				cache.content === contentLines &&
+				cache.contentLength === contentLines.length &&
+				cache.images.length === images.length
+			) {
 				let unchanged = true;
-				for (let index = 0; index < parts.length; index++) {
-					const part = parts[index]!;
-					if (part !== cache.parts[index] || part.length !== cache.lengths[index]) {
+				for (let index = 0; index < images.length; index++) {
+					const part = images[index]!;
+					if (part !== cache.images[index] || part.length !== cache.imageLengths[index]) {
 						unchanged = false;
 						break;
 					}
@@ -265,8 +286,13 @@ export class ToolExecutionComponent extends Container {
 				lines.push("");
 				lines.push(...contentLines);
 			}
-			for (const part of parts.slice(1)) lines.push(...part);
-			this.selfRenderCache = { width, parts, lengths: parts.map((part) => part.length), lines };
+			for (const part of images) lines.push(...part);
+			cache.width = width;
+			cache.content = contentLines;
+			cache.contentLength = contentLines.length;
+			cache.images = images;
+			cache.imageLengths = images === NO_PARTS ? NO_LENGTHS : images.map((part) => part.length);
+			cache.lines = lines;
 			return lines;
 		}
 
