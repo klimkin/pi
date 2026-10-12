@@ -835,9 +835,9 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		button: number,
 		x: number,
 		y: number,
-		extra: Partial<Pick<TuiMouseEvent, "wheelDelta" | "clickCount">> = {},
+		extra?: Pick<TuiMouseEvent, "wheelDelta" | "clickCount">,
 	): TuiMouseEvent {
-		return {
+		const event: TuiMouseEvent = {
 			type,
 			button: type === "wheel" ? "none" : this.decodeMouseButton(button),
 			x,
@@ -849,17 +849,21 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 			shift: (button & 4) !== 0,
 			alt: (button & 8) !== 0,
 			ctrl: (button & 16) !== 0,
-			...(extra.wheelDelta === undefined ? {} : { wheelDelta: extra.wheelDelta }),
-			...(extra.clickCount === undefined ? {} : { clickCount: extra.clickCount }),
 		};
+		// Optional fields are set only when present, without the temporary objects of conditional
+		// spreads: mouse moves arrive at a high rate.
+		if (extra?.wheelDelta !== undefined) event.wheelDelta = extra.wheelDelta;
+		if (extra?.clickCount !== undefined) event.clickCount = extra.clickCount;
+		return event;
 	}
 
 	private dispatchMouseToLayout(event: TuiMouseEvent): TuiMouseDispatchResult | undefined {
 		if (!this.currentLayout) return undefined;
-		const visited = new Set<Component>();
+		// The hit path is a few boxes long, so an array is cheaper than a Set.
+		const visited: Component[] = [];
 		const boxes = getLayoutBoxesAt(this.currentLayout, event.screenX, event.screenY);
 		for (const box of boxes) {
-			if (visited.has(box.component)) continue;
+			if (visited.includes(box.component)) continue;
 			// Stacks and stacked Containers only route events to their children, which the hit path
 			// already visits directly.
 			if (
@@ -867,7 +871,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 				box.component.handleMouse === Container.prototype.handleMouse
 			)
 				continue;
-			visited.add(box.component);
+			visited.push(box.component);
 			const result = dispatchMouseEvent(box.component, {
 				...event,
 				x: event.screenX - box.rect.x,
