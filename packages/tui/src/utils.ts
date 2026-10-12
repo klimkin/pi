@@ -259,11 +259,13 @@ export function visibleWidth(str: string): number {
 
 	// Fast path: printable ASCII, tabs, and ANSI escape sequences. Styled lines take this path, so
 	// re-rendering after a theme change does not run grapheme segmentation on every line.
+	// The rest lives in a separate function so this one stays small enough for V8 to inline into
+	// every hot caller, whatever ran before.
 	const asciiWidth = asciiVisibleWidth(str);
-	if (asciiWidth !== -1) {
-		return asciiWidth;
-	}
+	return asciiWidth !== -1 ? asciiWidth : graphemeVisibleWidth(str);
+}
 
+function graphemeVisibleWidth(str: string): number {
 	// Check cache
 	const cached = widthCache.get(str);
 	if (cached !== undefined) {
