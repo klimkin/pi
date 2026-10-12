@@ -7,7 +7,7 @@ import { Text } from "../src/components/text.ts";
 import { VStack } from "../src/components/v-stack.ts";
 import { renderLayoutFrame } from "../src/layout.ts";
 import { LAYOUT_NODE } from "../src/layout-node.ts";
-import { type Component, Container } from "../src/tui.ts";
+import { type Component, Container, type TuiMouseEvent, type TuiMouseEventResult } from "../src/tui.ts";
 import { TuiAltScreen } from "../src/tui-alt-screen.ts";
 import { TuiMainScreen } from "../src/tui-main-screen.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
@@ -24,6 +24,15 @@ class StableLines implements Component {
 		return this.lines;
 	}
 	invalidate(): void {}
+}
+
+/** StableLines that records the local row of each mouse event it receives. */
+class ClickableLines extends StableLines {
+	clickedRows: number[] = [];
+	handleMouse(event: TuiMouseEvent): TuiMouseEventResult {
+		this.clickedRows.push(event.y);
+		return { handled: true };
+	}
 }
 
 describe("Container render cache", () => {
@@ -71,6 +80,71 @@ describe("Container render cache", () => {
 
 		child.lines.push("b");
 		assert.deepStrictEqual(container.render(10), ["a", "b"]);
+	});
+
+	it("renders each child once when a middle child changes and routes mouse events by the new heights", () => {
+		const first = new StableLines(["a"]);
+		const middle = new StableLines(["b"]);
+		const last = new ClickableLines(["c"]);
+		const container = new Container();
+		container.addChild(first);
+		container.addChild(middle);
+		container.addChild(last);
+		container.render(10);
+
+		middle.lines = ["b1", "b2"];
+		assert.deepStrictEqual(container.render(10), ["a", "b1", "b2", "c"]);
+		assert.deepStrictEqual([first.renders, middle.renders, last.renders], [2, 2, 2]);
+
+		container.handleMouse({
+			type: "click",
+			button: "left",
+			x: 0,
+			y: 3,
+			screenX: 0,
+			screenY: 3,
+			width: 10,
+			height: 4,
+			shift: false,
+			alt: false,
+			ctrl: false,
+		});
+		assert.deepStrictEqual(last.clickedRows, [0]);
+	});
+
+	it("routes each row to the child that renders it, skipping zero-height children", () => {
+		const children = [
+			new ClickableLines([]),
+			new ClickableLines(["a1", "a2"]),
+			new ClickableLines([]),
+			new ClickableLines(["b1"]),
+			new ClickableLines(["c1", "c2", "c3"]),
+			new ClickableLines([]),
+		];
+		const container = new Container();
+		for (const child of children) container.addChild(child);
+		container.render(10);
+
+		const results = [0, 1, 2, 3, 4, 5, 6].map((y) =>
+			container.handleMouse({
+				type: "click",
+				button: "left",
+				x: 0,
+				y,
+				screenX: 0,
+				screenY: y,
+				width: 10,
+				height: 7,
+				shift: false,
+				alt: false,
+				ctrl: false,
+			}),
+		);
+		assert.deepStrictEqual(
+			children.map((child) => child.clickedRows),
+			[[], [0, 1], [], [0], [0, 1, 2], []],
+		);
+		assert.strictEqual(results[6], undefined);
 	});
 
 	it("rebuilds after invalidate", () => {
