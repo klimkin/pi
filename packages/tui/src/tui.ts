@@ -355,23 +355,19 @@ type ActiveOverlayFocusRestoreState = EligibleOverlayFocusRestoreState | Blocked
 type OverlayFocusRestoreState = { status: "inactive" } | ActiveOverlayFocusRestoreState;
 type OverlayFocusRestorePolicy = "clear" | "preserve";
 
+type RenderedChild = { component: Component; top: number; height: number; lines: string[] };
+
 /**
  * Container - a component that contains other components
  */
 export class Container implements Component {
 	children: Component[] = [];
-	private mouseLayout?: { width: number; children: Array<{ component: Component; height: number }> };
-	// Last render. Reused when the width, the children, and every child's returned array
-	// (identity and length) are unchanged, so an unchanged subtree costs one render call per
-	// child instead of copying every line on every frame.
-	protected renderCache?: {
-		width: number;
-		children: Component[];
-		childLines: string[][];
-		childLengths: number[];
-		mouseChildren: Array<{ component: Component; height: number }>;
-		lines: string[];
-	};
+	// Last render, with each child's returned array. Reused when the width, the children, and every
+	// child's returned array (identity and length) are unchanged, so an unchanged subtree costs one
+	// render call per child and no allocation instead of copying every line on every frame.
+	// Mouse dispatch reads the same child heights; invalidate() drops only the render cache.
+	protected renderCache?: { width: number; children: RenderedChild[]; lines: string[] };
+	private mouseLayout?: { width: number; children: RenderedChild[] };
 
 	addChild(component: Component): void {
 		this.children.push(component);
@@ -397,77 +393,84 @@ export class Container implements Component {
 
 	handleMouse(event: TuiMouseEvent): TuiMouseDispatchResult | undefined {
 		if (event.y < 0 || event.y >= event.height) return undefined;
-		const mouseChildren =
-			this.mouseLayout?.width === event.width
-				? this.mouseLayout.children
-				: this.children.map((component) => ({ component, height: component.render(event.width).length }));
-		let childY = 0;
-		for (const { component: child, height: childHeight } of mouseChildren) {
-			if (event.y >= childY && event.y < childY + childHeight) {
-				const result = dispatchMouseEvent(child, {
-					...event,
-					y: event.y - childY,
-					height: childHeight,
-				});
-				if (result?.focus && (this as Component).handleInput) return { ...result, focusTarget: this };
-				return result;
+		let entries = this.mouseLayout?.width === event.width ? this.mouseLayout.children : undefined;
+		if (!entries) {
+			entries = [];
+			let top = 0;
+			for (const component of this.children) {
+				const lines = component.render(event.width);
+				entries.push({ component, top, height: lines.length, lines });
+				top += lines.length;
 			}
-			childY += childHeight;
 		}
-		return undefined;
+		// Entries are sorted by top row, so the last one starting at or above y is the only candidate.
+		// A zero-height entry shares its top with the next entry, which comes later and wins.
+		let low = 0;
+		let high = entries.length - 1;
+		while (low < high) {
+			const middle = (low + high + 1) >> 1;
+			if (entries[middle]!.top <= event.y) low = middle;
+			else high = middle - 1;
+		}
+		const entry = entries[low];
+		if (!entry || event.y < entry.top || event.y >= entry.top + entry.height) return undefined;
+		const result = dispatchMouseEvent(entry.component, {
+			...event,
+			y: event.y - entry.top,
+			height: entry.height,
+		});
+		if (result?.focus && (this as Component).handleInput) return { ...result, focusTarget: this };
+		return result;
 	}
 
 	render(width: number): string[] {
 		const children = this.children;
 		const cache = this.renderCache?.width === width ? this.renderCache : undefined;
-		const childLines = new Array<string[]>(children.length);
-		let total = 0;
-		// Leading children whose output is unchanged since the last render.
+		// Leading children whose output is unchanged since the last render. The first changed
+		// child's output is kept so it is not rendered twice.
 		let unchanged = 0;
-		let inPrefix = cache !== undefined;
-		for (let index = 0; index < children.length; index++) {
-			const child = children[index]!;
-			const lines = child.render(width);
-			childLines[index] = lines;
-			total += lines.length;
-			if (
-				inPrefix &&
-				cache!.children[index] === child &&
-				cache!.childLines[index] === lines &&
-				cache!.childLengths[index] === lines.length
-			) {
+		let unchangedLines = 0;
+		let changed: string[] | undefined;
+		if (cache) {
+			const cached = cache.children;
+			while (unchanged < children.length && unchanged < cached.length) {
+				const entry = cached[unchanged]!;
+				if (entry.component !== children[unchanged]) break;
+				const lines = entry.component.render(width);
+				if (lines !== entry.lines || lines.length !== entry.height) {
+					changed = lines;
+					break;
+				}
+				unchangedLines += lines.length;
 				unchanged++;
-			} else {
-				inPrefix = false;
 			}
+			if (unchanged === children.length && unchanged === cached.length) return cache.lines;
 		}
-		if (cache && unchanged === children.length && unchanged === cache.children.length) return cache.lines;
+
+		const entries = unchanged > 0 ? cache!.children.slice(0, unchanged) : [];
+		let total = unchangedLines;
+		for (let index = unchanged; index < children.length; index++) {
+			const component = children[index]!;
+			const lines = index === unchanged && changed ? changed : component.render(width);
+			entries.push({ component, top: total, height: lines.length, lines });
+			total += lines.length;
+		}
 
 		// Streaming usually changes only the last child: copy the unchanged prefix from the cached
 		// array, then the changed tail, into one preallocated array (slice() plus push() would
 		// reallocate on the first push). The previous array stays intact for its holders.
 		const lines = new Array<string>(total);
-		let offset = 0;
 		if (unchanged > 0) {
 			const previous = cache!.lines;
-			for (let index = 0; index < unchanged; index++) offset += cache!.childLengths[index]!;
-			for (let line = 0; line < offset; line++) lines[line] = previous[line]!;
+			for (let line = 0; line < unchangedLines; line++) lines[line] = previous[line]!;
 		}
-		const mouseChildren = unchanged > 0 ? cache!.mouseChildren.slice(0, unchanged) : [];
-		for (let index = unchanged; index < children.length; index++) {
-			const rendered = childLines[index]!;
+		let offset = unchangedLines;
+		for (let index = unchanged; index < entries.length; index++) {
+			const rendered = entries[index]!.lines;
 			for (let line = 0; line < rendered.length; line++) lines[offset++] = rendered[line]!;
-			mouseChildren.push({ component: children[index]!, height: rendered.length });
 		}
-		this.mouseLayout = { width, children: mouseChildren };
-		this.renderCache = {
-			width,
-			children: [...children],
-			childLines,
-			childLengths: childLines.map((rendered) => rendered.length),
-			mouseChildren,
-			lines,
-		};
+		this.renderCache = { width, children: entries, lines };
+		this.mouseLayout = this.renderCache;
 		return lines;
 	}
 }
