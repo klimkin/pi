@@ -62,8 +62,13 @@ export const cjkPunctuationRegex = new RegExp(
 export const autocompleteSeparatorRegex = new RegExp(`(?:\\s|${cjkPunctuationRegex.source})`, "u");
 export const autocompleteBoundaryRegex = new RegExp(`(?:^|${autocompleteSeparatorRegex.source})`, "u");
 
-function isPrintableAscii(str: string): boolean {
-	for (let i = 0; i < str.length; i++) {
+/**
+ * Whether `str[start, end)` is printable ASCII. Each such character is its own grapheme with width 1,
+ * so such text can be measured and sliced without grapheme segmentation, which allocates
+ * ICU-backed objects that make every scavenge slower.
+ */
+function isPrintableAscii(str: string, start = 0, end = str.length): boolean {
+	for (let i = start; i < end; i++) {
 		const code = str.charCodeAt(i);
 		if (code < 0x20 || code > 0x7e) {
 			return false;
@@ -349,7 +354,13 @@ export function getGraphemeCellRange(line: string, column: number): GraphemeCell
 			continue;
 		}
 		let textEnd = i;
-		while (textEnd < line.length && !extractAnsiCode(line, textEnd)) textEnd++;
+		while (textEnd < line.length && !ansiCodeLength(line, textEnd)) textEnd++;
+		if (isPrintableAscii(line, i, textEnd)) {
+			if (column >= currentCol && column < currentCol + textEnd - i) return { start: column, end: column + 1 };
+			currentCol += textEnd - i;
+			i = textEnd;
+			continue;
+		}
 		for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
 			const width = graphemeWidth(segment);
 			if (width > 0 && column >= currentCol && column < currentCol + width) {
@@ -1299,7 +1310,22 @@ export function sliceWithWidth(
 		}
 
 		let textEnd = i;
-		while (textEnd < line.length && !extractAnsiCode(line, textEnd)) textEnd++;
+		while (textEnd < line.length && !ansiCodeLength(line, textEnd)) textEnd++;
+
+		if (isPrintableAscii(line, i, textEnd)) {
+			// One cell per character: copy the overlap with [startCol, endCol) in one slice.
+			const from = Math.max(0, startCol - currentCol);
+			const to = Math.min(textEnd - i, endCol - currentCol);
+			if (from < to) {
+				result += pendingAnsi + line.slice(i + from, i + to);
+				pendingAnsi = "";
+				resultWidth += to - from;
+			}
+			currentCol += to;
+			i = textEnd;
+			if (currentCol >= endCol) break;
+			continue;
+		}
 
 		for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
 			const w = graphemeWidth(segment);
