@@ -31,7 +31,7 @@ export interface LayoutBox {
 	lines?: readonly string[];
 	lineOffset?: number;
 	scrollView?: ScrollView;
-	/** Full scroll content. Built on first access when the content is a stacked Container. */
+	/** Full scroll content. Unset for stacked content until getScrollContentLines builds it. */
 	scrollContentLines?: readonly string[];
 	/** Plain Container laid out as stacked child boxes instead of one concatenated leaf. */
 	stacked?: boolean;
@@ -201,6 +201,19 @@ function childAtRow(box: LayoutBox, y: number): LayoutBox | undefined {
 	return undefined;
 }
 
+/**
+ * Full content of a scroll box. Stacked content is collected on first use and kept on the box;
+ * painting does not need it, so it is not built every frame. Boxes stay plain data objects:
+ * V8 creates object literals with accessors in dictionary mode, which slows every property read.
+ */
+export function getScrollContentLines(box: LayoutBox): readonly string[] | undefined {
+	const content = box.children[0];
+	if (!box.scrollContentLines && box.scrollView && content?.stacked) {
+		box.scrollContentLines = collectStackedLines(content);
+	}
+	return box.scrollContentLines;
+}
+
 /** Content line at a row of a scroll box without materializing a stacked content's full lines. */
 function scrollContentLineAt(box: LayoutBox, row: number): string | undefined {
 	const content = box.children[0];
@@ -254,21 +267,13 @@ function layoutComponent(
 		if (node.state.primary || !context.primaryScrollView) context.primaryScrollView = scrollView;
 		const rect = { x, y, width: safeWidth, height: viewportHeight };
 		const childClip = intersect(clip, rect);
-		let contentLines: readonly string[] | undefined = childBox.stacked
-			? undefined
-			: renderCached(context, node.component, contentWidth);
 		const box: LayoutBox = {
 			component,
 			rect,
 			clip: childClip,
 			children: [childBox],
 			scrollView,
-			// Search, selection, and copy read the full content on demand; painting a stacked
-			// transcript does not need it, so it is not built every frame.
-			get scrollContentLines() {
-				contentLines ??= collectStackedLines(childBox);
-				return contentLines;
-			},
+			scrollContentLines: childBox.stacked ? undefined : renderCached(context, node.component, contentWidth),
 			layer: 0,
 		};
 		childBox.parent = box;

@@ -4,7 +4,14 @@ import { HStack } from "../src/components/h-stack.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
 import { Text } from "../src/components/text.ts";
 import { VStack } from "../src/components/v-stack.ts";
-import { getLayoutBoxesAt, getScrollViewBox, getScrollViewsAt, renderLayoutFrame } from "../src/layout.ts";
+import {
+	getLayoutBoxesAt,
+	getScrollContentLines,
+	getScrollViewBox,
+	getScrollViewsAt,
+	type LayoutBox,
+	renderLayoutFrame,
+} from "../src/layout.ts";
 import { encodeKitty, registerKittyImageMetadata } from "../src/terminal-image.ts";
 import { type Component, Container } from "../src/tui.ts";
 import { stripTerminalSequences } from "../src/utils.ts";
@@ -114,8 +121,8 @@ describe("viewport layout", () => {
 			const leafFrame = renderLayoutFrame(leaf, 20, 4, () => {});
 			assert.deepStrictEqual(stackedFrame.lines, leafFrame.lines, `scrollTop ${stacked.scrollTop}`);
 			assert.deepStrictEqual(
-				getScrollViewBox(stackedFrame, stacked)?.scrollContentLines,
-				getScrollViewBox(leafFrame, leaf)?.scrollContentLines,
+				getScrollContentLines(getScrollViewBox(stackedFrame, stacked)!),
+				getScrollContentLines(getScrollViewBox(leafFrame, leaf)!),
 			);
 			assert.strictEqual(stackedFrame.root.children[0]?.stacked, true);
 		}
@@ -137,11 +144,11 @@ describe("viewport layout", () => {
 			assert.deepStrictEqual(content?.children, []);
 			assert.strictEqual(content?.rect.height, 800);
 			assert.deepStrictEqual(frame.lines, ["detail", "message 399", "detail"]);
-			assert.strictEqual(frame.root.scrollContentLines, content?.lines);
-			assert.deepStrictEqual(frame.root.scrollContentLines, document.render(20));
+			assert.strictEqual(getScrollContentLines(frame.root), content?.lines);
+			assert.deepStrictEqual(getScrollContentLines(frame.root), document.render(20));
 			if (!nested) {
 				const next = renderLayoutFrame(scroll, 20, 3, () => {});
-				assert.strictEqual(next.root.scrollContentLines, frame.root.scrollContentLines);
+				assert.strictEqual(getScrollContentLines(next.root), getScrollContentLines(frame.root));
 			}
 		}
 	});
@@ -154,7 +161,7 @@ describe("viewport layout", () => {
 			const frame = renderLayoutFrame(scroll, 20, 3, () => {});
 			assert.strictEqual(frame.root.children[0]?.stacked === true, stacked);
 			assert.deepStrictEqual(frame.lines, document.render(20).slice(-3));
-			assert.deepStrictEqual(frame.root.scrollContentLines, document.render(20));
+			assert.deepStrictEqual(getScrollContentLines(frame.root), document.render(20));
 		};
 		render(true);
 		const tail = fixedLines(["tail"]);
@@ -198,9 +205,27 @@ describe("viewport layout", () => {
 		assert.deepStrictEqual(collected, ["offscreen"]);
 		assert.strictEqual(source(), collected);
 		assert.strictEqual(reads, 1);
-		assert.deepStrictEqual(getScrollViewBox(frame, scroll)?.scrollContentLines, ["visible", "offscreen"]);
+		assert.deepStrictEqual(getScrollContentLines(getScrollViewBox(frame, scroll)!), ["visible", "offscreen"]);
 		assert.strictEqual(reads, 1);
 		assert.strictEqual(renders, 1);
+	});
+
+	it("keeps layout boxes as plain data objects", () => {
+		// V8 creates object literals with accessors in dictionary mode, so every property read on
+		// such a box becomes a hash lookup; a getter on the scroll box slowed mouse moves by a third.
+		const document = new Container();
+		document.addChild(fixedLines(["header"]));
+		document.addChild(new VStack([fixedLines(["a"])]));
+		const outer = new ScrollView(document);
+		const frame = renderLayoutFrame(new VStack([outer, new ScrollView(asLeaf(document))]), 20, 4, () => {});
+		assert.strictEqual(getScrollViewBox(frame, outer)?.children[0]?.stacked, true);
+		const visit = (box: LayoutBox): void => {
+			for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(box))) {
+				assert.ok(!descriptor.get && !descriptor.set, `${box.component.constructor.name}.${key} is an accessor`);
+			}
+			for (const child of box.children) visit(child);
+		};
+		visit(frame.root);
 	});
 
 	it("preserves stack and scroll child content across stacked transcript lookups", () => {
@@ -217,7 +242,7 @@ describe("viewport layout", () => {
 			const frame = renderLayoutFrame(stacked, 20, 3, () => {});
 			const expected = renderLayoutFrame(leaf, 20, 3, () => {});
 			assert.deepStrictEqual(frame.lines, expected.lines);
-			assert.deepStrictEqual(frame.root.scrollContentLines, expected.root.scrollContentLines);
+			assert.deepStrictEqual(getScrollContentLines(frame.root), getScrollContentLines(expected.root));
 		}
 	});
 

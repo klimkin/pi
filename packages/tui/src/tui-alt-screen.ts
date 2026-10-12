@@ -11,6 +11,7 @@ import { isKeyRelease } from "./keys.ts";
 import {
 	getLayoutBoxesAt,
 	getScrollbarGeometry,
+	getScrollContentLines,
 	getScrollViewBox,
 	getScrollViewsAt,
 	type LayoutFrame,
@@ -528,7 +529,8 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 	private scrollToPrompt(direction: -1 | 1): void {
 		if (!this.currentLayout) return;
 		const scrollView = this.getPrimaryScrollView();
-		const lines = getScrollViewBox(this.currentLayout, scrollView)?.scrollContentLines;
+		const box = getScrollViewBox(this.currentLayout, scrollView);
+		const lines = box && getScrollContentLines(box);
 		if (!lines) return;
 
 		for (let row = scrollView.scrollTop + direction; row >= 0 && row < lines.length; row += direction) {
@@ -619,7 +621,7 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		if (!search) return false;
 		const scrollView = layout.primaryScrollView ?? this.implicitScrollView;
 		const box = getScrollViewBox(layout, scrollView);
-		const lines = search.query.trim() ? box?.scrollContentLines : undefined;
+		const lines = box && search.query.trim() ? getScrollContentLines(box) : undefined;
 		if (!lines || !search.query.trim()) {
 			search.matches = [];
 			search.selectedIndex = -1;
@@ -1195,7 +1197,8 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 
 	private getSelectionSourceLine(point: SelectionPoint): string {
 		if (point.scrollView && this.currentLayout) {
-			const lines = getScrollViewBox(this.currentLayout, point.scrollView)?.scrollContentLines;
+			const box = getScrollViewBox(this.currentLayout, point.scrollView);
+			const lines = box && getScrollContentLines(box);
 			if (lines) return lines[point.row] ?? "";
 		}
 		return this.previousScreen[point.row] ?? "";
@@ -1471,8 +1474,9 @@ export class TuiAltScreen extends TuiBase implements ViewportTUI {
 		if (selection.start.scrollView) {
 			if (!this.currentLayout) return undefined;
 			const box = getScrollViewBox(this.currentLayout, selection.start.scrollView);
-			if (!box?.scrollContentLines) return undefined;
-			sourceLines = box.scrollContentLines;
+			const lines = box && getScrollContentLines(box);
+			if (!lines) return undefined;
+			sourceLines = lines;
 		}
 		const lines: string[] = [];
 		for (let row = selection.start.row; row <= selection.end.row; row++) {
