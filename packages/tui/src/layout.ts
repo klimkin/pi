@@ -540,22 +540,51 @@ function containsPoint(rect: LayoutRect, x: number, y: number): boolean {
 	return x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height;
 }
 
+/**
+ * Collect the boxes under (x, y) in pre-order. Module-level instead of a closure so hit tests, which
+ * run on every mouse event, allocate only the result arrays.
+ */
+function collectBoxesAt(
+	box: LayoutBox,
+	x: number,
+	y: number,
+	depth: number,
+	boxes: LayoutBox[],
+	depths: number[],
+): void {
+	if (!containsPoint(box.clip, x, y)) return;
+	boxes.push(box);
+	depths.push(depth);
+	if (box.childrenSortedByY) {
+		const child = childAtRow(box, y);
+		if (child) collectBoxesAt(child, x, y, depth + 1, boxes, depths);
+	} else {
+		for (const child of box.children) collectBoxesAt(child, x, y, depth + 1, boxes, depths);
+	}
+}
+
 /** Return the visual hit path from the deepest component to the layout root. */
 export function getLayoutBoxesAt(frame: LayoutFrame, x: number, y: number): LayoutBox[] {
-	const result: Array<{ box: LayoutBox; depth: number }> = [];
-	const visit = (box: LayoutBox, depth: number): void => {
-		if (!containsPoint(box.clip, x, y)) return;
-		result.push({ box, depth });
-		if (box.childrenSortedByY) {
-			const child = childAtRow(box, y);
-			if (child) visit(child, depth + 1);
-		} else {
-			for (const child of box.children) visit(child, depth + 1);
+	const boxes: LayoutBox[] = [];
+	const depths: number[] = [];
+	collectBoxesAt(frame.root, x, y, 0, boxes, depths);
+	// Stable insertion sort by layer, then depth, both descending. The path is a few boxes long, and
+	// Array.prototype.sort would allocate a temporary copy.
+	for (let index = 1; index < boxes.length; index++) {
+		const box = boxes[index]!;
+		const depth = depths[index]!;
+		let target = index;
+		while (target > 0) {
+			const previous = boxes[target - 1]!;
+			if (previous.layer > box.layer || (previous.layer === box.layer && depths[target - 1]! >= depth)) break;
+			boxes[target] = previous;
+			depths[target] = depths[target - 1]!;
+			target--;
 		}
-	};
-	visit(frame.root, 0);
-	result.sort((a, b) => b.box.layer - a.box.layer || b.depth - a.depth);
-	return result.map(({ box }) => box);
+		boxes[target] = box;
+		depths[target] = depth;
+	}
+	return boxes;
 }
 
 export function getScrollViewBox(frame: LayoutFrame, scrollView: ScrollView): LayoutBox | undefined {
@@ -570,19 +599,44 @@ export function getScrollViewBox(frame: LayoutFrame, scrollView: ScrollView): La
 	return visit(frame.root);
 }
 
+function collectScrollViewsAt(
+	box: LayoutBox,
+	x: number,
+	y: number,
+	depth: number,
+	scrollViews: ScrollView[],
+	depths: number[],
+): void {
+	if (!containsPoint(box.clip, x, y)) return;
+	if (box.scrollView && containsPoint(box.rect, x, y)) {
+		scrollViews.push(box.scrollView);
+		depths.push(depth);
+	}
+	if (box.childrenSortedByY) {
+		const child = childAtRow(box, y);
+		if (child) collectScrollViewsAt(child, x, y, depth + 1, scrollViews, depths);
+	} else {
+		for (const child of box.children) collectScrollViewsAt(child, x, y, depth + 1, scrollViews, depths);
+	}
+}
+
+/** Return the scroll views under (x, y), deepest first. */
 export function getScrollViewsAt(frame: LayoutFrame, x: number, y: number): ScrollView[] {
-	const result: Array<{ scrollView: ScrollView; depth: number }> = [];
-	const visit = (box: LayoutBox, depth: number): void => {
-		if (!containsPoint(box.clip, x, y)) return;
-		if (box.scrollView && containsPoint(box.rect, x, y)) result.push({ scrollView: box.scrollView, depth });
-		if (box.childrenSortedByY) {
-			const child = childAtRow(box, y);
-			if (child) visit(child, depth + 1);
-		} else {
-			for (const child of box.children) visit(child, depth + 1);
+	const scrollViews: ScrollView[] = [];
+	const depths: number[] = [];
+	collectScrollViewsAt(frame.root, x, y, 0, scrollViews, depths);
+	// Stable insertion sort by depth, descending; see getLayoutBoxesAt.
+	for (let index = 1; index < scrollViews.length; index++) {
+		const scrollView = scrollViews[index]!;
+		const depth = depths[index]!;
+		let target = index;
+		while (target > 0 && depths[target - 1]! < depth) {
+			scrollViews[target] = scrollViews[target - 1]!;
+			depths[target] = depths[target - 1]!;
+			target--;
 		}
-	};
-	visit(frame.root, 0);
-	result.sort((a, b) => b.depth - a.depth);
-	return result.map((entry) => entry.scrollView);
+		scrollViews[target] = scrollView;
+		depths[target] = depth;
+	}
+	return scrollViews;
 }
