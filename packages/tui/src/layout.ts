@@ -143,15 +143,17 @@ function updateClips(box: LayoutBox, parentClip: LayoutRect): void {
  * A Container with the default render and mouse handling only concatenates its children.
  * As direct scroll content (the fullscreen transcript document), layout places its children
  * as separate boxes instead, so a streaming update does not copy the whole history into the
- * document's array as well. Limit this to eight direct children: document sections such as
- * header, resources, and chat keep a bounded box cost even as the history grows. Containers
- * with more children use their cached concatenated lines; a box per message costs more than
- * copying its lines. Only one level is stacked; child Containers render as ordinary leaves.
+ * document's array as well. The child limit keeps document sections such as header, resources,
+ * and chat at a bounded box cost even as the history grows. Containers with more children use
+ * their cached concatenated lines; a box per message costs more than copying its lines. Only
+ * one level is stacked; child Containers render as ordinary leaves.
  */
+const MAX_STACKED_CHILDREN = 8;
+
 function isStackableContainer(component: Component): component is Container {
 	return (
 		component instanceof Container &&
-		component.children.length <= 8 &&
+		component.children.length <= MAX_STACKED_CHILDREN &&
 		component.render === Container.prototype.render &&
 		component.handleMouse === Container.prototype.handleMouse
 	);
@@ -565,27 +567,34 @@ function collectBoxesAt(
 	}
 }
 
-/** Return the visual hit path from the deepest component to the layout root. */
-export function getLayoutBoxesAt(frame: LayoutFrame, x: number, y: number): LayoutBox[] {
-	const boxes: LayoutBox[] = [];
-	const depths: number[] = [];
-	collectBoxesAt(frame.root, x, y, 0, boxes, depths);
-	// Stable insertion sort by layer, then depth, both descending. The path is a few boxes long, and
-	// Array.prototype.sort would allocate a temporary copy.
+/**
+ * Stable insertion sort of a hit path, deepest first, optionally by layer before depth. The path is a
+ * few boxes long, and Array.prototype.sort would allocate a temporary copy.
+ */
+function sortHitPath(boxes: LayoutBox[], depths: number[], byLayer: boolean): void {
 	for (let index = 1; index < boxes.length; index++) {
 		const box = boxes[index]!;
 		const depth = depths[index]!;
 		let target = index;
 		while (target > 0) {
 			const previous = boxes[target - 1]!;
-			if (previous.layer > box.layer || (previous.layer === box.layer && depths[target - 1]! >= depth)) break;
+			const previousDepth = depths[target - 1]!;
+			if (byLayer && previous.layer !== box.layer ? previous.layer > box.layer : previousDepth >= depth) break;
 			boxes[target] = previous;
-			depths[target] = depths[target - 1]!;
+			depths[target] = previousDepth;
 			target--;
 		}
 		boxes[target] = box;
 		depths[target] = depth;
 	}
+}
+
+/** Return the visual hit path from the deepest component to the layout root. */
+export function getLayoutBoxesAt(frame: LayoutFrame, x: number, y: number): LayoutBox[] {
+	const boxes: LayoutBox[] = [];
+	const depths: number[] = [];
+	collectBoxesAt(frame.root, x, y, 0, boxes, depths);
+	sortHitPath(boxes, depths, true);
 	return boxes;
 }
 
@@ -601,44 +610,21 @@ export function getScrollViewBox(frame: LayoutFrame, scrollView: ScrollView): La
 	return visit(frame.root);
 }
 
-function collectScrollViewsAt(
-	box: LayoutBox,
-	x: number,
-	y: number,
-	depth: number,
-	scrollViews: ScrollView[],
-	depths: number[],
-): void {
-	if (!containsPoint(box.clip, x, y)) return;
-	if (box.scrollView && containsPoint(box.rect, x, y)) {
-		scrollViews.push(box.scrollView);
-		depths.push(depth);
-	}
-	if (box.childrenSortedByY) {
-		const child = childAtRow(box, y);
-		if (child) collectScrollViewsAt(child, x, y, depth + 1, scrollViews, depths);
-	} else {
-		for (const child of box.children) collectScrollViewsAt(child, x, y, depth + 1, scrollViews, depths);
-	}
-}
-
 /** Return the scroll views under (x, y), deepest first. */
 export function getScrollViewsAt(frame: LayoutFrame, x: number, y: number): ScrollView[] {
-	const scrollViews: ScrollView[] = [];
+	const boxes: LayoutBox[] = [];
 	const depths: number[] = [];
-	collectScrollViewsAt(frame.root, x, y, 0, scrollViews, depths);
-	// Stable insertion sort by depth, descending; see getLayoutBoxesAt.
-	for (let index = 1; index < scrollViews.length; index++) {
-		const scrollView = scrollViews[index]!;
-		const depth = depths[index]!;
-		let target = index;
-		while (target > 0 && depths[target - 1]! < depth) {
-			scrollViews[target] = scrollViews[target - 1]!;
-			depths[target] = depths[target - 1]!;
-			target--;
-		}
-		scrollViews[target] = scrollView;
-		depths[target] = depth;
+	collectBoxesAt(frame.root, x, y, 0, boxes, depths);
+	let count = 0;
+	for (let index = 0; index < boxes.length; index++) {
+		const box = boxes[index]!;
+		if (!box.scrollView || !containsPoint(box.rect, x, y)) continue;
+		boxes[count] = box;
+		depths[count] = depths[index]!;
+		count++;
 	}
-	return scrollViews;
+	boxes.length = count;
+	depths.length = count;
+	sortHitPath(boxes, depths, false);
+	return boxes.map((box) => box.scrollView!);
 }
