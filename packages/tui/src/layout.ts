@@ -545,25 +545,29 @@ function containsPoint(rect: LayoutRect, x: number, y: number): boolean {
 }
 
 /**
- * Collect the boxes under (x, y) in pre-order. Module-level instead of a closure so hit tests, which
- * run on every mouse event, allocate only the result arrays.
+ * Collect the boxes under (x, y) in pre-order, or only the scroll boxes whose rect holds the point.
+ * Module-level instead of a closure so hit tests, which run on every mouse event, allocate only the
+ * result arrays.
  */
 function collectBoxesAt(
 	box: LayoutBox,
 	x: number,
 	y: number,
 	depth: number,
+	scrollViewsOnly: boolean,
 	boxes: LayoutBox[],
 	depths: number[],
 ): void {
 	if (!containsPoint(box.clip, x, y)) return;
-	boxes.push(box);
-	depths.push(depth);
+	if (!scrollViewsOnly || (box.scrollView && containsPoint(box.rect, x, y))) {
+		boxes.push(box);
+		depths.push(depth);
+	}
 	if (box.childrenSortedByY) {
 		const child = childAtRow(box, y);
-		if (child) collectBoxesAt(child, x, y, depth + 1, boxes, depths);
+		if (child) collectBoxesAt(child, x, y, depth + 1, scrollViewsOnly, boxes, depths);
 	} else {
-		for (const child of box.children) collectBoxesAt(child, x, y, depth + 1, boxes, depths);
+		for (const child of box.children) collectBoxesAt(child, x, y, depth + 1, scrollViewsOnly, boxes, depths);
 	}
 }
 
@@ -593,7 +597,7 @@ function sortHitPath(boxes: LayoutBox[], depths: number[], byLayer: boolean): vo
 export function getLayoutBoxesAt(frame: LayoutFrame, x: number, y: number): LayoutBox[] {
 	const boxes: LayoutBox[] = [];
 	const depths: number[] = [];
-	collectBoxesAt(frame.root, x, y, 0, boxes, depths);
+	collectBoxesAt(frame.root, x, y, 0, false, boxes, depths);
 	sortHitPath(boxes, depths, true);
 	return boxes;
 }
@@ -614,17 +618,7 @@ export function getScrollViewBox(frame: LayoutFrame, scrollView: ScrollView): La
 export function getScrollViewsAt(frame: LayoutFrame, x: number, y: number): ScrollView[] {
 	const boxes: LayoutBox[] = [];
 	const depths: number[] = [];
-	collectBoxesAt(frame.root, x, y, 0, boxes, depths);
-	let count = 0;
-	for (let index = 0; index < boxes.length; index++) {
-		const box = boxes[index]!;
-		if (!box.scrollView || !containsPoint(box.rect, x, y)) continue;
-		boxes[count] = box;
-		depths[count] = depths[index]!;
-		count++;
-	}
-	boxes.length = count;
-	depths.length = count;
+	collectBoxesAt(frame.root, x, y, 0, true, boxes, depths);
 	sortHitPath(boxes, depths, false);
 	return boxes.map((box) => box.scrollView!);
 }
