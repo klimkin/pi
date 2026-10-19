@@ -298,4 +298,35 @@ describe("Box render cache", () => {
 		child.lines = ["a"];
 		assert.strictEqual(box.render(10), lines);
 	});
+
+	it("routes clicks inside the padding to the child under the row", () => {
+		const first = new ClickableLines(["a"]);
+		const second = new ClickableLines(["b", "c"]);
+		const box = new Box(2, 1);
+		box.addChild(first);
+		box.addChild(second);
+		assert.strictEqual(box.render(10).length, 5);
+
+		const click = (x: number, y: number) =>
+			box.handleMouse({
+				type: "click",
+				button: "left",
+				x,
+				y,
+				screenX: x,
+				screenY: y,
+				width: 10,
+				height: 5,
+				shift: false,
+				alt: false,
+				ctrl: false,
+			});
+		assert.strictEqual(click(2, 0), undefined);
+		assert.strictEqual(click(1, 2), undefined);
+		assert.strictEqual(click(8, 2), undefined);
+		click(2, 1);
+		click(7, 3);
+		assert.strictEqual(click(2, 4), undefined);
+		assert.deepStrictEqual([first.clickedRows, second.clickedRows], [[0], [1]]);
+	});
 });
