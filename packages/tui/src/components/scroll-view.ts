@@ -1,16 +1,9 @@
 import { LAYOUT_NODE, type ScrollLayoutNode } from "../layout-node.ts";
 import { type Component, Container } from "../tui.ts";
-import type { RenderChild } from "./stack.ts";
 
-/** Render the full scroll content, reserving the scrollbar column. Shared by ScrollView.render and layout measurement. */
-export function renderScrollViewContent(
-	child: Component,
-	width: number,
-	contentWidth: number,
-	renderChild: RenderChild,
-): string[] {
-	const lines = renderChild(child, contentWidth);
-	return contentWidth === width ? lines : lines.map((line) => `${line} `);
+/** Pad content lines with the column reserved for an always-visible scrollbar. */
+export function withScrollbarColumn(lines: readonly string[]): string[] {
+	return lines.map((line) => `${line} `);
 }
 
 export type ScrollViewScrollbar = "hidden" | "auto" | "always";
@@ -49,6 +42,8 @@ export class ScrollView extends Container {
 	private transientScrollbarVisible = false;
 	private scrollbarActive = false;
 	private scrollbarHideTimer: NodeJS.Timeout | undefined;
+	// Padded lines for the child's last returned array, so the output stays stable while the child's does.
+	private scrollbarColumnCache?: { source: readonly string[]; length: number; lines: string[] };
 
 	constructor(component: Component, options: ScrollViewOptions = {}) {
 		super();
@@ -224,10 +219,20 @@ export class ScrollView extends Container {
 		throw new Error("ScrollView child cannot be cleared");
 	}
 
+	override invalidate(): void {
+		this.scrollbarColumnCache = undefined;
+		super.invalidate();
+	}
+
 	override render(width: number): string[] {
-		return renderScrollViewContent(this.child, width, this.getContentWidth(width), (component, childWidth) =>
-			component.render(childWidth),
-		);
+		const contentWidth = this.getContentWidth(width);
+		const source = this.child.render(contentWidth);
+		if (contentWidth === width) return source;
+		const cache = this.scrollbarColumnCache;
+		if (cache?.source === source && cache.length === source.length) return cache.lines;
+		const lines = withScrollbarColumn(source);
+		this.scrollbarColumnCache = { source, length: source.length, lines };
+		return lines;
 	}
 
 	[LAYOUT_NODE](): ScrollLayoutNode {

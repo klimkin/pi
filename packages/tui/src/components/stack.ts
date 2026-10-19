@@ -16,8 +16,31 @@ export interface StackEntry extends StackEntryOptions {
 
 export type StackChild = Component | StackEntry;
 
-/** Renders a child component; layout passes a per-frame cached renderer. */
-export type RenderChild = (component: Component, width: number) => string[];
+/** A visible child's rendered lines, their length when rendered, and its allocated size on the stack axis. */
+export interface StackRow {
+	component: Component;
+	lines: readonly string[];
+	height: number;
+	size: number;
+}
+
+/** True when the rows render to the same stack output: same children, returned arrays, lengths, and sizes. */
+function sameStackRows(previous: readonly StackRow[], next: readonly StackRow[]): boolean {
+	if (previous.length !== next.length) return false;
+	for (let index = 0; index < next.length; index++) {
+		const before = previous[index]!;
+		const after = next[index]!;
+		if (
+			before.component !== after.component ||
+			before.lines !== after.lines ||
+			before.height !== after.height ||
+			before.size !== after.size
+		) {
+			return false;
+		}
+	}
+	return true;
+}
 
 export interface StackOptions {
 	gap?: number;
@@ -37,6 +60,8 @@ export abstract class Stack extends Container {
 	protected readonly gap: number;
 	protected readonly align: "stretch" | "start" | "center" | "end";
 	protected abstract readonly layoutType: "vstack" | "hstack";
+	// Stable output lets ancestor Containers reuse their concatenated lines.
+	private stackRenderCache?: { width: number; rows: StackRow[]; lines: string[] };
 
 	constructor(children: StackChild[] = [], options: StackOptions = {}) {
 		super();
@@ -70,6 +95,20 @@ export abstract class Stack extends Container {
 	override clear(): void {
 		super.clear();
 		this.entries.length = 0;
+	}
+
+	override invalidate(): void {
+		this.stackRenderCache = undefined;
+		super.invalidate();
+	}
+
+	/** Return the previous lines when width and rows match, otherwise collect and remember new ones. */
+	protected renderRows(width: number, rows: StackRow[], collect: (rows: readonly StackRow[]) => string[]): string[] {
+		const cache = this.stackRenderCache;
+		if (cache?.width === width && sameStackRows(cache.rows, rows)) return cache.lines;
+		const lines = collect(rows);
+		this.stackRenderCache = { width, rows, lines };
+		return lines;
 	}
 
 	[LAYOUT_NODE](): StackLayoutNode {

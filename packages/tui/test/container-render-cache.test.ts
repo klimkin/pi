@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { Box } from "../src/components/box.ts";
+import { HStack } from "../src/components/h-stack.ts";
 import { ScrollView } from "../src/components/scroll-view.ts";
 import { Spacer } from "../src/components/spacer.ts";
 import { Text } from "../src/components/text.ts";
@@ -10,6 +11,7 @@ import { LAYOUT_NODE } from "../src/layout-node.ts";
 import { type Component, Container, type TuiMouseEvent, type TuiMouseEventResult } from "../src/tui.ts";
 import { TuiAltScreen } from "../src/tui-alt-screen.ts";
 import { TuiMainScreen } from "../src/tui-main-screen.ts";
+import { stripTerminalSequences } from "../src/utils.ts";
 import { VirtualTerminal } from "./virtual-terminal.ts";
 
 /** Leaf that returns a stable array until replaced, like Text or Markdown. */
@@ -273,6 +275,42 @@ describe("VStack render cache", () => {
 		const empty = stack.render(10);
 		assert.deepStrictEqual(empty, []);
 		assert.strictEqual(stack.render(10), empty);
+	});
+});
+
+describe("HStack render cache", () => {
+	it("returns the same array until a child, its allocated width, or the stack width changes", () => {
+		const left = new StableLines(["a"]);
+		const right = new StableLines(["b", "c"]);
+		const stack = new HStack([left, right], { gap: 1 });
+		const plain = (lines: string[]) => lines.map((line) => stripTerminalSequences(line).trimEnd());
+		const initial = stack.render(5);
+		assert.deepStrictEqual(plain(initial), ["a b", "  c"]);
+		assert.strictEqual(stack.render(5), initial);
+
+		right.lines = ["bb"];
+		const replaced = stack.render(5);
+		assert.deepStrictEqual(plain(replaced), ["a bb"]);
+		left.lines.push("d");
+		assert.deepStrictEqual(plain(stack.render(5)), ["a bb", "d"]);
+		assert.notStrictEqual(stack.render(6), stack.render(5));
+		const resized = stack.render(6);
+		stack.invalidate();
+		assert.notStrictEqual(stack.render(6), resized);
+	});
+});
+
+describe("ScrollView render cache", () => {
+	it("keeps the scrollbar-padded lines stable while the child's array is stable", () => {
+		const child = new StableLines(["a"]);
+		const scroll = new ScrollView(child, { scrollbar: "always" });
+		const initial = scroll.render(5);
+		assert.deepStrictEqual(initial, ["a "]);
+		assert.strictEqual(scroll.render(5), initial);
+		child.lines.push("b");
+		assert.deepStrictEqual(scroll.render(5), ["a ", "b "]);
+		child.lines = ["c"];
+		assert.deepStrictEqual(scroll.render(5), ["c "]);
 	});
 });
 

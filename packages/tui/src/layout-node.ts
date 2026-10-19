@@ -41,6 +41,9 @@ export interface ScrollLayoutNode {
 
 export type LayoutNode = StackLayoutNode | ScrollLayoutNode;
 
+/** Renders a child component; layout passes a per-frame cached renderer. */
+export type RenderChild = (component: Component, width: number) => string[];
+
 export interface LayoutComponent extends Component {
 	[LAYOUT_NODE](): LayoutNode;
 }

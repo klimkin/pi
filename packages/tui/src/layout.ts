@@ -1,5 +1,5 @@
 import { HStack, renderHStack } from "./components/h-stack.ts";
-import { renderScrollViewContent, ScrollView } from "./components/scroll-view.ts";
+import { ScrollView, withScrollbarColumn } from "./components/scroll-view.ts";
 import { allocateStackSizes, visibleStackEntries } from "./components/stack.ts";
 import { renderVStack, VStack } from "./components/v-stack.ts";
 import { getLayoutNode, type LayoutNode } from "./layout-node.ts";
@@ -108,7 +108,9 @@ function renderCached(context: LayoutContext, component: Component, width: numbe
 function renderLayoutNode(context: LayoutContext, node: LayoutNode, width: number): string[] {
 	const renderChild = (child: Component, childWidth: number) => renderCached(context, child, childWidth);
 	if (node.type === "scroll") {
-		return renderScrollViewContent(node.component, width, node.state.getContentWidth(width), renderChild);
+		const contentWidth = node.state.getContentWidth(width);
+		const lines = renderChild(node.component, contentWidth);
+		return contentWidth === width ? lines : withScrollbarColumn(lines);
 	}
 	if (node.type === "vstack") return renderVStack(node.entries, node.gap, width, renderChild);
 	return renderHStack(node.entries, node.gap, node.align, width, renderChild);

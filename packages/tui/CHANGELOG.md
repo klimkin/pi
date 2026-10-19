@@ -18,7 +18,7 @@
 
 ### Breaking Changes
 
-- Arrays returned by `Component.render()` are now read-only. `Container`, `Box`, and `Spacer` return the same cached array while their output is unchanged, and parents detect unchanged children by array identity. Components that modified the result of `super.render()` or a child's `render()` in place must copy it first, and components must return a new array when their content changes instead of mutating a previously returned one
+- Arrays returned by `Component.render()` are now read-only. `Container`, `Box`, `Spacer`, `VStack`, `HStack`, and `ScrollView` return the same cached array while their output is unchanged, and parents detect unchanged children by array identity. Components that modified the result of `super.render()` or a child's `render()` in place must copy it first, and components must return a new array when their content changes instead of mutating a previously returned one
 
 
 ## [1.4.0] - 2026-10-21
