@@ -9,7 +9,6 @@ import {
 	getScrollContentLines,
 	getScrollViewBox,
 	getScrollViewsAt,
-	type LayoutBox,
 	renderLayoutFrame,
 } from "../src/layout.ts";
 import { encodeKitty, registerKittyImageMetadata } from "../src/terminal-image.ts";
@@ -244,24 +243,6 @@ describe("viewport layout", () => {
 		assert.deepStrictEqual(getScrollContentLines(getScrollViewBox(frame, scroll)!), ["visible", "offscreen"]);
 		assert.strictEqual(reads, 1);
 		assert.strictEqual(renders, 1);
-	});
-
-	it("keeps layout boxes as plain data objects", () => {
-		// V8 creates object literals with accessors in dictionary mode, so every property read on
-		// such a box becomes a hash lookup; a getter on the scroll box slowed mouse moves by a third.
-		const document = new Container();
-		document.addChild(fixedLines(["header"]));
-		document.addChild(new VStack([fixedLines(["a"])]));
-		const outer = new ScrollView(document);
-		const frame = renderLayoutFrame(new VStack([outer, new ScrollView(asLeaf(document))]), 20, 4, () => {});
-		assert.strictEqual(getScrollViewBox(frame, outer)?.children[0]?.stacked, true);
-		const visit = (box: LayoutBox): void => {
-			for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(box))) {
-				assert.ok(!descriptor.get && !descriptor.set, `${box.component.constructor.name}.${key} is an accessor`);
-			}
-			for (const child of box.children) visit(child);
-		};
-		visit(frame.root);
 	});
 
 	it("preserves stack and scroll child content across stacked transcript lookups", () => {

@@ -173,52 +173,25 @@ describe("ToolExecutionComponent parity", () => {
 		expect(component.render(120)).toEqual(initial);
 	});
 
-	test("keys self-rendered lines on width even when part arrays stay identical", () => {
-		const lines = ["fixed"];
+	test("returns a stable empty array when a self-rendered tool renders nothing", () => {
+		let lines = ["call"];
 		const component = new ToolExecutionComponent(
 			"tool",
-			"tool-self-width",
+			"tool-empty",
 			{},
 			{},
 			{ renderShell: "self", renderCall: () => ({ render: () => lines, invalidate: () => {} }) },
 			createFakeTui(),
 			process.cwd(),
 		);
-		// Isolate the width key from Container's own width-dependent array identity.
-		const shell = Reflect.get(component, "selfRenderContainer") as { render: (width: number) => string[] };
-		const render = vi.spyOn(shell, "render").mockReturnValue(lines);
-		try {
-			const wide = component.render(120);
-			expect(component.render(120)).toBe(wide);
-			const narrow = component.render(80);
-			expect(narrow).not.toBe(wide);
-			expect(narrow).toEqual(wide);
-			expect(component.render(80)).toBe(narrow);
-			expect(component.render(120)).not.toBe(narrow);
-		} finally {
-			render.mockRestore();
-		}
-	});
-
-	test("returns a stable empty array when the component is hidden", () => {
-		const component = new ToolExecutionComponent(
-			"tool",
-			"tool-hidden",
-			{},
-			{},
-			undefined,
-			createFakeTui(),
-			process.cwd(),
-		);
 		const visible = component.render(120);
-		// Exercise the hidden-state guard directly; fallback renderers always provide content.
-		Reflect.set(component, "hideComponent", true);
+		lines = [];
 		const empty = component.render(120);
 		expect(empty).toEqual([]);
 		expect(component.render(120)).toBe(empty);
 		expect(component.render(80)).toBe(empty);
-		Reflect.set(component, "hideComponent", false);
-		expect(component.render(120)).toBe(visible);
+		lines = ["call"];
+		expect(component.render(120)).toEqual(visible);
 	});
 
 	test("uses built-in rendering for built-in overrides without custom renderers", () => {

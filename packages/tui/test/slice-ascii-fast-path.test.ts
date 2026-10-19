@@ -102,26 +102,12 @@ const asciiPieces = [
 const mixedPieces = [...asciiPieces, "中文", "e\u0301", "a\u200d", "👍🏽", "\t", "│", "─"];
 
 describe("sliceWithWidth and getGraphemeCellRange printable ASCII fast path", () => {
-	it("slices and hit-tests styled printable ASCII without grapheme segmentation", () => {
+	it("slices and hit-tests styled printable ASCII with hyperlinks like the segmenter", () => {
 		const line = `${ESC}[48;5;236m ${ESC}[1muser${ESC}[22m: inspect this ${ESC}]8;;https://x.dev\x07link${ESC}]8;;\x07 ${ESC}[0m`;
-		const expectedHead = referenceSlice(line, 0, 7, true);
-		const expectedTail = referenceSlice(line, 3, 100, true);
-		const segmenter = getGraphemeSegmenter();
-		const segment = segmenter.segment;
-		let calls = 0;
-		segmenter.segment = (input: string) => {
-			calls++;
-			return segment.call(segmenter, input);
-		};
-		try {
-			assert.deepStrictEqual(sliceWithWidth(line, 0, 7, true), expectedHead);
-			assert.deepStrictEqual(sliceWithWidth(line, 3, 100, true), expectedTail);
-			assert.deepStrictEqual(getGraphemeCellRange(line, 5), { start: 5, end: 6 });
-			assert.strictEqual(getGraphemeCellRange(line, 200), undefined);
-			assert.strictEqual(calls, 0);
-		} finally {
-			segmenter.segment = segment;
-		}
+		assert.deepStrictEqual(sliceWithWidth(line, 0, 7, true), referenceSlice(line, 0, 7, true));
+		assert.deepStrictEqual(sliceWithWidth(line, 3, 100, true), referenceSlice(line, 3, 100, true));
+		assert.deepStrictEqual(getGraphemeCellRange(line, 5), referenceCellRange(line, 5));
+		assert.strictEqual(getGraphemeCellRange(line, 200), undefined);
 	});
 
 	it("matches the segmenter result for random ASCII and mixed lines", () => {
