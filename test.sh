@@ -74,6 +74,15 @@ done
 value="${NODE_EXTRA_CA_CERTS-}"
 [[ -z "$value" ]] || test_env+=("NODE_EXTRA_CA_CERTS=$value")
 
+# Network tests cannot reach the internet behind a mandatory proxy without these.
+# Node's built-in fetch ignores the proxy variables unless NODE_USE_ENV_PROXY is set.
+proxy_set=
+for name in HTTP_PROXY HTTPS_PROXY NO_PROXY http_proxy https_proxy no_proxy; do
+	value="${!name-}"
+	[[ -z "$value" ]] || { test_env+=("$name=$value"); proxy_set=1; }
+done
+[[ -z "$proxy_set" ]] || test_env+=("NODE_USE_ENV_PROXY=1")
+
 # Preserve CI detection only for runner behavior and test reporting.
 for name in CI GITHUB_ACTIONS; do
 	value="${!name-}"
